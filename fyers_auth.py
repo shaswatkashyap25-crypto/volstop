@@ -58,12 +58,12 @@ def step2_verify_totp(request_key):
     return data['request_key']
 
 def step3_verify_pin(request_key):
+    ses = requests.Session()
     if not PIN:
-        print("No PIN — skipping")
-        return request_key
+        print("No PIN — skipping, using request_key as token")
+        return request_key, ses
     url = "https://api-t2.fyers.in/vagator/v2/verify_pin_v2"
     payload = {"request_key": request_key, "identity_type": "pin", "identifier": enc(PIN)}
-    ses = requests.Session()
     r = ses.post(url, json=payload)
     print(f"step3_verify_pin: {r.status_code} {r.text}")
     data = r.json()
