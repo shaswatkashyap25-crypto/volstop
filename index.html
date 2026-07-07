@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>VolStop — Forward Test Logger</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0f12;--s1:#13171c;--s2:#1a1f26;
+  --border:#1e242c;--border2:#2a3240;
+  --text:#e2e8f0;--muted:#64748b;
+  --accent:#38bdf8;--accent2:#818cf8;
+  --green:#34d399;--amber:#fbbf24;--red:#f87171;
+  --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;min-height:100vh}
+header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:14px}
+.logo{width:30px;height:30px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:500;color:#0d0f12}
+.logo-text{font-size:15px;font-weight:500}
+.logo-sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto}
+.layout{display:grid;grid-template-columns:380px 1fr;height:calc(100vh - 53px)}
+.sidebar{border-right:1px solid var(--border);padding:18px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;background:var(--s1)}
+.main{padding:20px 24px;overflow-y:auto}
+.sec-label{font-size:10px;font-family:var(--mono);color:var(--muted);letter-spacing:1.4px;text-transform:uppercase;margin-bottom:8px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;color:var(--muted);font-family:var(--mono);letter-spacing:.4px}
+.field input,.field select,.field textarea{width:100%;background:var(--s2);border:1px solid var(--border2);border-radius:6px;padding:8px 10px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;transition:border-color .15s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.field textarea{resize:vertical;min-height:90px;line-height:1.5}
+.seg{display:flex}
+.seg button{flex:1;padding:7px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .15s}
+.seg button:first-child{border-radius:6px 0 0 6px}
+.seg button:last-child{border-radius:0 6px 6px 0;border-left:none}
+.seg button.on-mom{background:#1c3a2e;border-color:var(--green);color:var(--green)}
+.seg button.on-rev{background:#2d1f3a;border-color:var(--accent2);color:var(--accent2)}
+.mode-tabs{display:flex;gap:6px;margin-bottom:4px}
+.mode-tab{flex:1;padding:7px;font-family:var(--mono);font-size:11px;border-radius:6px;border:1px solid var(--border2);background:var(--s2);color:var(--muted);cursor:pointer;text-align:center;transition:all .15s}
+.mode-tab.active{background:#1a2e3d;border-color:var(--accent);color:var(--accent)}
+.btn-main{width:100%;padding:9px;background:var(--accent);color:#0d0f12;border:none;border-radius:6px;font-family:var(--mono);font-size:12px;font-weight:500;cursor:pointer;transition:opacity .15s}
+.btn-main:hover{opacity:.85}
+.btn-main:disabled{opacity:.4;cursor:not-allowed}
+.btn-sec{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);border-radius:6px;font-family:var(--mono);font-size:12px;cursor:pointer;transition:all .15s}
+.btn-sec:hover{background:#2d1f3a}
+.parsed-list{display:flex;flex-direction:column;gap:8px}
+.parsed-item{background:var(--s2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px}
+.parsed-item-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.parsed-ticker{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent)}
+.parsed-price{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.parsed-orig{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px}
+.parsed-orig span{color:var(--text)}
+.res-box{background:var(--s2);border:1px solid var(--border2);border-radius:10px;padding:14px;display:none;flex-direction:column;gap:10px}
+.res-box.show{display:flex}
+.res-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.res-ticker{font-family:var(--mono);font-size:15px;font-weight:500;color:var(--accent)}
+.res-ep{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.badge{font-size:10px;padding:2px 6px;border-radius:3px;font-family:var(--mono)}
+.badge-mom{background:#1c3a2e;color:var(--green)}
+.badge-rev{background:#2d1f3a;color:var(--accent2)}
+.history-note{font-size:10px;font-family:var(--mono);color:var(--amber);background:#2e2514;border:1px solid #3d2f0a;border-radius:4px;padding:5px 8px;display:none}
+.history-note.show{display:block}
+.vol-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.vc{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 9px}
+.vc-lb{font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:2px}
+.vc-fv{font-size:12px;font-family:var(--mono);color:var(--accent)}
+.vc-dv{font-size:11px;font-family:var(--mono);color:var(--amber)}
+.vc-na{font-size:10px;font-family:var(--mono);color:var(--muted);font-style:italic}
+.combo-tbl{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono)}
+.combo-tbl th{padding:4px 5px;color:var(--muted);border-bottom:1px solid var(--border);font-size:10px;text-align:center}
+.combo-tbl th:first-child{text-align:left}
+.combo-tbl td{padding:5px 5px;border-bottom:1px solid var(--border);text-align:center;line-height:1.6}
+.combo-tbl td:first-child{text-align:left;color:var(--muted)}
+.combo-tbl tr:last-child td{border-bottom:none}
+.fv-val{color:var(--accent)}
+.dv-val{color:var(--amber)}
+.tgt-val{color:var(--green)}
+.na-val{color:var(--muted);font-size:10px}
+.pill-fv{background:#1a2e3d;color:var(--accent);padding:1px 4px;border-radius:3px;font-size:9px}
+.pill-dv{background:#2e2514;color:var(--amber);padding:1px 4px;border-radius:3px;font-size:9px}
+.btn-log{width:100%;padding:7px;background:transparent;border:1px solid var(--green);border-radius:6px;color:var(--green);font-family:var(--mono);font-size:11px;cursor:pointer;transition:background .15s}
+.btn-log:hover{background:#1c3a2e}
+.tabs{display:flex;border-bottom:1px solid var(--border);margin-bottom:16px}
+.tab{padding:7px 16px;font-size:12px;font-family:var(--mono);color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tc{display:none}
+.tc.active{display:block}
+.tbl-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.exp-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer}
+.exp-btn:hover{color:var(--text)}
+.refresh-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--amber);cursor:pointer;margin-left:auto}
+.refresh-btn:hover{background:#2e2514}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap;font-family:var(--mono)}
+.tbl th{text-align:left;padding:7px 9px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border);background:var(--s1);letter-spacing:.5px;position:sticky;top:0}
+.tbl td{padding:7px 9px;border-bottom:1px solid var(--border);color:var(--text)}
+.tbl tr:hover td{background:var(--s1)}
+.c-open{color:var(--amber)}
+.c-win{color:var(--green)}
+.c-loss{color:var(--red)}
+.c-ambig{color:var(--muted)}
+.btn-close-tr,.btn-edit-tr,.btn-del-tr{padding:3px 7px;background:transparent;border:1px solid var(--border2);border-radius:4px;color:var(--muted);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;margin-right:3px}
+.btn-close-tr:hover{border-color:var(--amber);color:var(--amber)}
+.btn-edit-tr:hover{border-color:var(--accent2);color:var(--accent2)}
+.btn-del-tr:hover{border-color:var(--red);color:var(--red)}
+.auto-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#1c3a2e;color:var(--green);margin-left:4px}
+.empty{text-align:center;padding:48px;color:var(--muted);font-family:var(--mono);font-size:12px}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal{background:var(--s2);border:1px solid var(--border2);border-radius:10px;padding:20px;width:340px;max-height:90vh;overflow-y:auto}
+.modal h3{font-size:13px;font-weight:500;color:var(--accent);font-family:var(--mono);margin-bottom:12px}
+.modal-form{display:flex;flex-direction:column;gap:9px}
+.modal-acts{display:flex;gap:8px;margin-top:12px}
+.modal-acts button{flex:1;padding:8px;border-radius:6px;font-family:var(--mono);font-size:12px;cursor:pointer}
+.btn-confirm{background:var(--green);color:#0d0f12;border:none}
+.btn-confirm-accent{background:var(--accent2);color:#fff;border:none}
+.btn-cancel{background:transparent;border:1px solid var(--border2);color:var(--muted)}
+.toast{position:fixed;bottom:20px;right:20px;padding:9px 14px;border-radius:8px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);color:var(--text);opacity:0;transform:translateY(6px);transition:all .22s;pointer-events:none;z-index:200}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.ok{border-color:var(--green);color:var(--green)}
+.toast.err{border-color:var(--red);color:var(--red)}
+.spin{display:inline-block;width:11px;height:11px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .65s linear infinite;vertical-align:middle;margin-right:4px}
+@keyframes sp{to{transform:rotate(360deg)}}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.divider{height:1px;background:var(--border);margin:2px 0}
+.orig-sl{color:var(--red)}
+.orig-tgt{color:var(--green)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">σ</div>
+  <span class="logo-text">VolStop</span>
+  <span class="logo-sub">volatility-scaled stops &amp; targets // forward test logger</span>
+</header>
+
+<div class="layout">
+<aside class="sidebar">
+
+  <!-- Mode switcher -->
+  <div>
+    <div class="mode-tabs">
+      <div class="mode-tab active" id="mode-single" onclick="switchMode('single')">Single Trade</div>
+      <div class="mode-tab" id="mode-paste" onclick="switchMode('paste')">Paste &amp; Log</div>
+    </div>
+  </div>
+
+  <!-- SINGLE MODE -->
+  <div id="panel-single">
+    <div class="sec-label">New trade</div>
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div class="field"><label>TICKER</label>
+        <input id="inp-ticker" placeholder="RELIANCE / HDFCBANK" autocomplete="off" onkeydown="if(event.key==='Enter')compute()" />
+      </div>
+      <div class="field"><label>ENTRY PRICE (₹)</label>
+        <input id="inp-price" type="number" placeholder="0.00" step="0.05" onkeydown="if(event.key==='Enter')compute()" />
+      </div>
+      <div class="field"><label>SETUP TYPE</label>
+        <div class="seg">
+          <button id="b-mom" onclick="setSeg('MOMENTUM')">Momentum</button>
+          <button id="b-rev" onclick="setSeg('REVERSAL')">Reversal</button>
+        </div>
+      </div>
+      <button class="btn-main" id="btn-compute" onclick="compute()">Compute stops &amp; targets</button>
+    </div>
+
+    <div class="res-box" id="res-box">
+      <div class="res-head">
+        <span class="res-ticker" id="res-tkr"></span>
+        <span class="res-ep" id="res-ep"></span>
+        <span class="badge" id="res-badge"></span>
+      </div>
+      <div class="history-note" id="history-note"></div>
+      <div>
+        <div class="sec-label">Annualised vol</div>
+        <div class="vol-grid" id="vol-grid"></div>
+      </div>
+      <div>
+        <div class="sec-label" style="margin-bottom:5px">Stops &amp; targets — all k × lookback &nbsp;<span class="pill-fv">FV</span> <span class="pill-dv">DV</span></div>
+        <div style="overflow-x:auto">
+          <table class="combo-tbl">
+            <thead><tr><th>Vol/k→</th><th>1.5×</th><th>2.0×</th><th>2.5×</th><th>3.0×</th></tr></thead>
+            <tbody id="combo-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <button class="btn-log" onclick="logTrade()">↓ Log this trade</button>
+    </div>
+  </div>
+
+  <!-- PASTE MODE -->
+  <div id="panel-paste" style="display:none">
+    <div class="sec-label">Paste trade messages</div>
+    <div style="display:flex;flex-direction:column;gap:9px">
+      <div class="field">
+        <label>PASTE FROM WHATSAPP / TELEGRAM</label>
+        <textarea id="paste-input" placeholder="[02/07/26, 9:10:31 AM] Ravi: #POSITIONAL&#10;DMART&#10;BUY ABOVE: 4375&#10;SL: 4287 (DAY-CLOSING BASIS)&#10;TGT: 4551&#10;Holding Period: 30 Days&#10;&#10;...paste multiple trades"></textarea>
+      </div>
+      <div class="field">
+        <label>MODE</label>
+        <div class="seg">
+          <button id="p-forward" onclick="setPasteMode('forward')" class="on-mom">Forward Test</button>
+          <button id="p-backtest" onclick="setPasteMode('backtest')">Backtest</button>
+        </div>
+      </div>
+      <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
+    </div>
+    <div class="parsed-list" id="parsed-list" style="margin-top:10px"></div>
+    <button class="btn-main" id="btn-log-all" style="display:none;margin-top:10px" onclick="logAllParsed()">↓ Log all trades</button>
+  </div>
+
+</aside>
+
+<main class="main">
+  <div class="tabs">
+    <div class="tab active" onclick="swTab('open',this)">Open trades</div>
+    <div class="tab" onclick="swTab('closed',this)">Closed trades</div>
+    <div class="tab" onclick="swTab('backtest',this)">Backtest</div>
+  </div>
+
+  <!-- OPEN -->
+  <div class="tc active" id="tc-open">
+    <div class="tbl-actions">
+      <button class="exp-btn" onclick="exportCSV('open')">Export CSV</button>
+      <button class="refresh-btn" onclick="autoCheck()">⟳ Check prices &amp; auto-close</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr>
+          <th>TICKER</th><th>DATE</th><th>ENTRY</th><th>SETUP</th>
+          <th>ORIG SL</th><th>ORIG TGT</th>
+          <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
+          <th>DV20 k2 SL</th><th>DV20 k2 TGT</th>
+          <th>FV20%</th><th>DV20%</th><th>ACTIONS</th>
+        </tr></thead>
+        <tbody id="tb-open"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CLOSED -->
+  <div class="tc" id="tc-closed">
+    <div class="tbl-actions">
+      <button class="exp-btn" onclick="exportCSV('closed')">Export CSV</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr>
+          <th>TICKER</th><th>ENTRY</th><th>EXIT</th>
+          <th>ENTRY ₹</th><th>EXIT ₹</th><th>LOG RET</th>
+          <th>SETUP</th><th>REASON</th><th>ACTIONS</th>
+        </tr></thead>
+        <tbody id="tb-closed"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- BACKTEST -->
+  <div class="tc" id="tc-backtest">
+    <div class="tbl-actions">
+      <button class="exp-btn" onclick="exportCSV('backtest')">Export CSV</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr>
+          <th>TICKER</th><th>DATE</th><th>ENTRY</th><th>SETUP</th>
+          <th>ORIG SL</th><th>ORIG TGT</th>
+          <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
+          <th>DV20 k2 SL</th><th>DV20 k2 TGT</th>
+          <th>FV20%</th><th>DV20%</th>
+          <th>EXIT ₹</th><th>LOG RET</th><th>ACTIONS</th>
+        </tr></thead>
+        <tbody id="tb-backtest"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+</div>
+
+<!-- Close Modal -->
+<div class="modal-overlay" id="modal-close">
+  <div class="modal">
+    <h3 id="modal-close-title">Close trade</h3>
+    <div class="modal-form">
+      <div class="field"><label>EXIT PRICE (₹)</label><input id="m-price" type="number" step="0.05" /></div>
+      <div class="field"><label>EXIT DATE</label><input id="m-date" type="date" /></div>
+      <div class="field"><label>EXIT REASON</label>
+        <select id="m-reason">
+          <option value="TARGET_HIT">Target hit</option>
+          <option value="SL_HIT">Stop hit</option>
+          <option value="AMBIGUOUS">Ambiguous (SL &amp; target same day)</option>
+          <option value="TIME_EXIT">Time exit (30d)</option>
+          <option value="MANUAL">Manual exit</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeModal('modal-close')">Cancel</button>
+      <button class="btn-confirm" onclick="confirmClose()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="modal-edit">
+  <div class="modal">
+    <h3>Edit trade</h3>
+    <div class="modal-form">
+      <div class="field"><label>TICKER</label><input id="e-ticker" type="text" /></div>
+      <div class="field"><label>ENTRY PRICE (₹)</label><input id="e-price" type="number" step="0.05" /></div>
+      <div class="field"><label>ENTRY DATE</label><input id="e-date" type="date" /></div>
+      <div class="field"><label>SETUP TYPE</label>
+        <select id="e-setup">
+          <option value="MOMENTUM">Momentum</option>
+          <option value="REVERSAL">Reversal</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeModal('modal-edit')">Cancel</button>
+      <button class="btn-confirm-accent" onclick="confirmEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Setup tag modal for paste -->
+<div class="modal-overlay" id="modal-setup">
+  <div class="modal">
+    <h3 id="modal-setup-title">Tag setup type</h3>
+    <div class="modal-form">
+      <div class="field"><label>SETUP TYPE FOR ALL PARSED TRADES</label>
+        <select id="ms-setup">
+          <option value="MOMENTUM">Momentum</option>
+          <option value="REVERSAL">Reversal</option>
+        </select>
+      </div>
+      <p style="font-size:11px;color:var(--muted);font-family:var(--mono)">You can edit individual trades after logging.</p>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeModal('modal-setup')">Cancel</button>
+      <button class="btn-confirm" onclick="confirmLogAll()">Log all</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const LBS=[20,60,252], KS=[1.5,2,2.5,3], HORIZON=30;
+let cur=null, closing=null, editing=null, setup='MOMENTUM', pasteMode='forward';
+let parsedTrades=[];
+
+setSeg('MOMENTUM'); renderTrades();
+
+// ── Mode & Seg ──
+function switchMode(m){
+  document.getElementById('panel-single').style.display=m==='single'?'flex':'none';
+  if(m==='single') document.getElementById('panel-single').style.flexDirection='column';
+  document.getElementById('panel-paste').style.display=m==='paste'?'block':'none';
+  document.getElementById('mode-single').classList.toggle('active',m==='single');
+  document.getElementById('mode-paste').classList.toggle('active',m==='paste');
+}
+function setSeg(val){
+  setup=val;
+  document.getElementById('b-mom').className=val==='MOMENTUM'?'on-mom':'';
+  document.getElementById('b-rev').className=val==='REVERSAL'?'on-rev':'';
+}
+function setPasteMode(m){
+  pasteMode=m;
+  document.getElementById('p-forward').className=m==='forward'?'on-mom':'';
+  document.getElementById('p-backtest').className=m==='backtest'?'on-rev':'';
+}
+function swTab(name,el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tc-'+name).classList.add('active');
+}
+
+// ── Data fetch ──
+async function fetchPrices(ticker, forDate=null){
+  const raw=ticker.replace(/\.(NS|BO)$/i,'');
+  const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
+  const end=forDate?new Date(forDate):new Date();
+  end.setDate(end.getDate()+2);
+  const start=new Date(end); start.setDate(start.getDate()-420);
+  const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
+  for(const sfx of trySfx){
+    const sym=raw+sfx;
+    const urls=[
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`,
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`,
+    ];
+    for(const url of urls){
+      try{
+        const r=await fetch(url);
+        if(!r.ok) continue;
+        const j=await r.json();
+        const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
+        const clean=closes?closes.filter(Boolean):[];
+        if(clean.length>=20) return{sym,closes:clean};
+      }catch(e){}
+    }
+  }
+  throw new Error('No data for '+ticker);
+}
+
+async function fetchLTP(ticker){
+  const raw=ticker.replace(/\.(NS|BO)$/i,'');
+  const sfx=ticker.match(/\.(NS|BO)$/i)?ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS';
+  const sym=raw+sfx;
+  try{
+    const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`);
+    const j=await r.json();
+    const price=j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    return price||null;
+  }catch(e){return null;}
+}
+
+function logReturns(p){const lr=[];for(let i=1;i<p.length;i++)lr.push(Math.log(p[i]/p[i-1]));return lr;}
+function fullVol(lr,lb){
+  if(lr.length<lb) return null;
+  const s=lr.slice(-lb),mean=s.reduce((a,b)=>a+b,0)/s.length;
+  return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(252);
+}
+function downVol(lr,lb){
+  if(lr.length<lb) return null;
+  const s=lr.slice(-lb).filter(x=>x<0);
+  if(s.length<5) return fullVol(lr,lb);
+  const mean=s.reduce((a,b)=>a+b,0)/s.length;
+  return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(2)*Math.sqrt(252);
+}
+function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
+function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
+
+async function computeVol(ticker, entry, setupType, forDate=null){
+  const{sym,closes}=await fetchPrices(ticker, forDate);
+  const lr=logReturns(closes);
+  const d={ticker:sym,entry_price:entry,setup_type:setupType,
+    entry_date:forDate||new Date().toISOString().split('T')[0],
+    history_days:lr.length,
+    orig_sl:'',orig_tgt:'',
+    exit_date:'',exit_price:'',exit_reason:'',log_return:'',auto_closed:''};
+  LBS.forEach(lb=>{
+    const fv=fullVol(lr,lb),dv=downVol(lr,lb);
+    d[`fv_${lb}_ann`]=fv?(fv*100).toFixed(1):null;
+    d[`dv_${lb}_ann`]=dv?(dv*100).toFixed(1):null;
+    KS.forEach(k=>{
+      const ks=k.toFixed(1).replace('.','_');
+      d[`stop_fv_${lb}_k${ks}`]=fv?stopPx(entry,fv,k):null;
+      d[`tgt_fv_${lb}_k${ks}`]=fv?tgtPx(entry,fv,k):null;
+      d[`stop_dv_${lb}_k${ks}`]=dv?stopPx(entry,dv,k):null;
+      d[`tgt_dv_${lb}_k${ks}`]=dv?tgtPx(entry,dv,k):null;
+    });
+  });
+  return d;
+}
+
+// ── Single compute ──
+async function compute(){
+  const ticker=document.getElementById('inp-ticker').value.trim().toUpperCase();
+  const entry=parseFloat(document.getElementById('inp-price').value);
+  if(!ticker||!entry){toast('Enter ticker and entry price','err');return;}
+  const btn=document.getElementById('btn-compute');
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span>Fetching…';
+  try{
+    const d=await computeVol(ticker,entry,setup);
+    cur=d;renderResult(d);
+  }catch(e){toast(e.message,'err');}
+  finally{btn.disabled=false;btn.innerHTML='Compute stops &amp; targets';}
+}
+
+function fmt(v,dec=2){
+  if(v===undefined||v===null||v==='') return '—';
+  return parseFloat(v).toLocaleString('en-IN',{minimumFractionDigits:dec});
+}
+
+function renderResult(d){
+  document.getElementById('res-tkr').textContent=d.ticker;
+  document.getElementById('res-ep').textContent='@ ₹'+fmt(d.entry_price);
+  const b=document.getElementById('res-badge');
+  b.textContent=d.setup_type;b.className='badge badge-'+(d.setup_type==='MOMENTUM'?'mom':'rev');
+  const note=document.getElementById('history-note');
+  if(d.history_days<252){
+    const missing=LBS.filter(lb=>d.history_days<lb);
+    note.textContent=`${d.history_days} days of history. ${missing.map(l=>l+'d').join(', ')} lookback skipped.`;
+    note.classList.add('show');
+  }else{note.classList.remove('show');}
+  document.getElementById('vol-grid').innerHTML=LBS.map(lb=>{
+    const fv=d[`fv_${lb}_ann`],dv=d[`dv_${lb}_ann`];
+    if(!fv) return`<div class="vc"><div class="vc-lb">${lb}d</div><div class="vc-na">n/a</div></div>`;
+    return`<div class="vc"><div class="vc-lb">${lb}d</div><div class="vc-fv">${fv}%</div><div class="vc-dv">↓${dv??'—'}%</div></div>`;
+  }).join('');
+  let rows='';
+  LBS.forEach(lb=>{
+    rows+=`<tr><td><span class="pill-fv">FV</span>${lb}d</td>${KS.map(k=>{
+      const ks=k.toFixed(1).replace('.','_');
+      if(!d[`fv_${lb}_ann`]) return`<td class="na-val">n/a</td>`;
+      return`<td><span class="fv-val">▼₹${fmt(d[`stop_fv_${lb}_k${ks}`])}</span><br><span class="tgt-val">▲₹${fmt(d[`tgt_fv_${lb}_k${ks}`])}</span></td>`;
+    }).join('')}</tr>`;
+    rows+=`<tr><td><span class="pill-dv">DV</span>${lb}d</td>${KS.map(k=>{
+      const ks=k.toFixed(1).replace('.','_');
+      if(!d[`dv_${lb}_ann`]) return`<td class="na-val">n/a</td>`;
+      return`<td><span class="dv-val">▼₹${fmt(d[`stop_dv_${lb}_k${ks}`])}</span><br><span class="tgt-val">▲₹${fmt(d[`tgt_dv_${lb}_k${ks}`])}</span></td>`;
+    }).join('')}</tr>`;
+  });
+  document.getElementById('combo-body').innerHTML=rows;
+  document.getElementById('res-box').classList.add('show');
+}
+
+// ── Paste parser ──
+function parsePaste(){
+  const text=document.getElementById('paste-input').value.trim();
+  if(!text){toast('Paste some trade messages first','err');return;}
+  const blocks=text.split(/#POSITIONAL/i).filter(b=>b.trim());
+  parsedTrades=[];
+  const list=document.getElementById('parsed-list');
+  list.innerHTML='';
+  blocks.forEach((block,i)=>{
+    const lines=block.split(/\n/).map(l=>l.trim()).filter(Boolean);
+    // Extract date from preceding timestamp if present
+    const dateMatch=text.match(/\[(\d{2})\/(\d{2})\/(\d{2}),\s*\d+:\d+/);
+    let entryDate=new Date().toISOString().split('T')[0];
+    if(dateMatch){
+      entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+    }
+    // Find ticker (first non-empty line after splitting)
+    const ticker=lines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
+    const buyLine=lines.find(l=>/BUY ABOVE/i.test(l));
+    const slLine=lines.find(l=>/^SL:/i.test(l));
+    const tgtLine=lines.find(l=>/^TGT:/i.test(l));
+    if(!ticker||!buyLine) return;
+    const entry=parseFloat(buyLine.replace(/[^0-9.]/g,''));
+    const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
+    const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
+    if(!entry||isNaN(entry)) return;
+    parsedTrades.push({ticker,entry,origSl,origTgt,entryDate,setup:'MOMENTUM'});
+    const el=document.createElement('div');
+    el.className='parsed-item';
+    el.innerHTML=`
+      <div class="parsed-item-head">
+        <span class="parsed-ticker">${ticker}</span>
+        <span class="parsed-price">₹${entry}</span>
+      </div>
+      <div class="parsed-orig">
+        SL <span class="orig-sl">${origSl?'₹'+origSl:'—'}</span> &nbsp;
+        TGT <span class="orig-tgt">${origTgt?'₹'+origTgt:'—'}</span> &nbsp;
+        Date <span>${entryDate}</span>
+      </div>
+      <div class="field">
+        <label>SETUP</label>
+        <div class="seg">
+          <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="on-mom">Momentum</button>
+          <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')">Reversal</button>
+        </div>
+      </div>`;
+    list.appendChild(el);
+  });
+  if(parsedTrades.length===0){toast('No trades found — check the format','err');return;}
+  toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
+  document.getElementById('btn-log-all').style.display='block';
+}
+
+function setParsedSetup(i,val){
+  parsedTrades[i].setup=val;
+  document.getElementById(`ps-mom-${i}`).className=val==='MOMENTUM'?'on-mom':'';
+  document.getElementById(`ps-rev-${i}`).className=val==='REVERSAL'?'on-rev':'';
+}
+
+async function logAllParsed(){
+  if(!parsedTrades.length) return;
+  const btn=document.getElementById('btn-log-all');
+  btn.disabled=true;btn.innerHTML='<span class="spin"></span>Fetching vol data…';
+  const isBacktest=pasteMode==='backtest';
+  const trades=getTrades();
+  let success=0,fail=0;
+  for(const p of parsedTrades){
+    try{
+      const d=await computeVol(p.ticker,p.entry,p.setup,p.entryDate);
+      d.orig_sl=p.origSl||'';
+      d.orig_tgt=p.origTgt||'';
+      d.is_backtest=isBacktest?'1':'';
+      trades.push(d);
+      success++;
+    }catch(e){fail++;}
+  }
+  saveTrades(trades);
+  renderTrades();
+  toast(`${success} logged${fail?', '+fail+' failed':''}`,success>0?'ok':'err');
+  btn.disabled=false;btn.innerHTML='↓ Log all trades';
+  document.getElementById('parsed-list').innerHTML='';
+  document.getElementById('btn-log-all').style.display='none';
+  document.getElementById('paste-input').value='';
+  parsedTrades=[];
+}
+
+// ── Single log ──
+function logTrade(){
+  if(!cur) return;
+  const trades=getTrades();trades.push({...cur});saveTrades(trades);
+  toast('Trade logged ✓','ok');renderTrades();
+}
+
+// ── Auto-close ──
+async function autoCheck(){
+  const trades=getTrades();
+  const open=trades.filter(t=>!t.exit_price&&!t.is_backtest);
+  if(!open.length){toast('No open trades to check','ok');return;}
+  toast('Checking prices…','');
+  let closed=0;
+  const today=new Date().toISOString().split('T')[0];
+  for(const t of open){
+    const ltp=await fetchLTP(t.ticker);
+    if(!ltp) continue;
+    const sl=parseFloat(t['stop_fv_20_k2_0']);
+    const tgt=parseFloat(t['tgt_fv_20_k2_0']);
+    const orig_sl=parseFloat(t.orig_sl);
+    const orig_tgt=parseFloat(t.orig_tgt);
+    // Check vol-based stops first, then original
+    let reason=null;
+    if(tgt&&ltp>=tgt) reason='TARGET_HIT';
+    else if(sl&&ltp<=sl) reason='SL_HIT';
+    else if(orig_tgt&&ltp>=orig_tgt) reason='TARGET_HIT';
+    else if(orig_sl&&ltp<=orig_sl) reason='SL_HIT';
+    if(reason){
+      t.exit_price=ltp;t.exit_date=today;t.exit_reason=reason;t.auto_closed='1';
+      t.log_return=Math.log(ltp/parseFloat(t.entry_price)).toFixed(6);
+      closed++;
+    }
+  }
+  saveTrades(trades);renderTrades();
+  toast(closed?`${closed} trade${closed>1?'s':''} auto-closed`:'All trades still open','ok');
+}
+
+// ── Storage ──
+function getTrades(){try{return JSON.parse(localStorage.getItem('volstop_v4')||'[]')}catch{return[]}}
+function saveTrades(t){localStorage.setItem('volstop_v4',JSON.stringify(t))}
+
+// ── Render ──
+function renderTrades(){
+  const all=getTrades();
+  const open=all.filter(t=>!t.exit_price&&!t.is_backtest);
+  const closed=all.filter(t=>t.exit_price&&!t.is_backtest);
+  const backtest=all.filter(t=>t.is_backtest);
+
+  // Open
+  const ot=document.getElementById('tb-open');
+  ot.innerHTML=open.length?open.map(t=>`<tr>
+    <td class="c-open">${t.ticker}</td>
+    <td>${t.entry_date}</td>
+    <td>₹${fmt(t.entry_price)}</td>
+    <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
+    <td class="orig-sl">${t.orig_sl?'₹'+fmt(t.orig_sl):'—'}</td>
+    <td class="orig-tgt">${t.orig_tgt?'₹'+fmt(t.orig_tgt):'—'}</td>
+    <td class="fv-val">₹${fmt(t['stop_fv_20_k2_0'])}</td>
+    <td class="tgt-val">₹${fmt(t['tgt_fv_20_k2_0'])}</td>
+    <td class="dv-val">₹${fmt(t['stop_dv_20_k2_0'])}</td>
+    <td class="tgt-val">₹${fmt(t['tgt_dv_20_k2_0'])}</td>
+    <td class="fv-val">${t['fv_20_ann']??'—'}%</td>
+    <td class="dv-val">${t['dv_20_ann']??'—'}%</td>
+    <td>
+      <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
+      <button class="btn-close-tr" onclick="openClose(${all.indexOf(t)})">Close</button>
+      <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
+    </td>
+  </tr>`).join(''):`<tr><td colspan="13"><div class="empty">No open trades.</div></td></tr>`;
+
+  // Closed
+  const ct=document.getElementById('tb-closed');
+  ct.innerHTML=closed.length?closed.map(t=>{
+    const lr=parseFloat(t.log_return);
+    const cls=t.exit_reason==='AMBIGUOUS'?'c-ambig':t.log_return?(lr>=0?'c-win':'c-loss'):'';
+    return`<tr>
+      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}</td>
+      <td>${t.entry_date}</td><td>${t.exit_date||'—'}</td>
+      <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.exit_price)}</td>
+      <td class="${cls}">${t.log_return?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
+      <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
+      <td style="font-size:10px;color:var(--muted)">${t.exit_reason||'—'}</td>
+      <td>
+        <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
+        <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
+      </td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="9"><div class="empty">No closed trades.</div></td></tr>`;
+
+  // Backtest
+  const bt=document.getElementById('tb-backtest');
+  bt.innerHTML=backtest.length?backtest.map(t=>{
+    const lr=parseFloat(t.log_return);
+    const cls=t.log_return?(lr>=0?'c-win':'c-loss'):'';
+    return`<tr>
+      <td class="c-open">${t.ticker}</td>
+      <td>${t.entry_date}</td><td>₹${fmt(t.entry_price)}</td>
+      <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
+      <td class="orig-sl">${t.orig_sl?'₹'+fmt(t.orig_sl):'—'}</td>
+      <td class="orig-tgt">${t.orig_tgt?'₹'+fmt(t.orig_tgt):'—'}</td>
+      <td class="fv-val">₹${fmt(t['stop_fv_20_k2_0'])}</td>
+      <td class="tgt-val">₹${fmt(t['tgt_fv_20_k2_0'])}</td>
+      <td class="dv-val">₹${fmt(t['stop_dv_20_k2_0'])}</td>
+      <td class="tgt-val">₹${fmt(t['tgt_dv_20_k2_0'])}</td>
+      <td class="fv-val">${t['fv_20_ann']??'—'}%</td>
+      <td class="dv-val">${t['dv_20_ann']??'—'}%</td>
+      <td>₹${fmt(t.exit_price)}</td>
+      <td class="${cls}">${t.log_return?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
+      <td>
+        <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
+        <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
+      </td>
+    </tr>`;
+  }).join(''):`<tr><td colspan="15"><div class="empty">No backtest trades. Use Paste &amp; Log → Backtest mode.</div></td></tr>`;
+}
+
+// ── Modals ──
+function openClose(idx){
+  closing=idx;
+  const t=getTrades()[idx];
+  document.getElementById('modal-close-title').textContent='Close — '+t.ticker;
+  document.getElementById('m-date').value=new Date().toISOString().split('T')[0];
+  document.getElementById('m-price').value='';
+  document.getElementById('modal-close').classList.add('show');
+}
+function confirmClose(){
+  if(closing===null) return;
+  const ep=parseFloat(document.getElementById('m-price').value);
+  const ed=document.getElementById('m-date').value;
+  const er=document.getElementById('m-reason').value;
+  if(!ep||!ed){toast('Fill all fields','err');return;}
+  const trades=getTrades();const t=trades[closing];
+  t.exit_price=ep;t.exit_date=ed;t.exit_reason=er;t.auto_closed='';
+  t.log_return=Math.log(ep/parseFloat(t.entry_price)).toFixed(6);
+  saveTrades(trades);closeModal('modal-close');renderTrades();
+  toast('Trade closed ✓','ok');
+}
+function openEdit(idx){
+  editing=idx;
+  const t=getTrades()[idx];
+  document.getElementById('e-ticker').value=t.ticker;
+  document.getElementById('e-price').value=t.entry_price;
+  document.getElementById('e-date').value=t.entry_date;
+  document.getElementById('e-setup').value=t.setup_type;
+  document.getElementById('modal-edit').classList.add('show');
+}
+function confirmEdit(){
+  if(editing===null) return;
+  const trades=getTrades();const t=trades[editing];
+  t.ticker=document.getElementById('e-ticker').value.trim().toUpperCase();
+  t.entry_price=parseFloat(document.getElementById('e-price').value);
+  t.entry_date=document.getElementById('e-date').value;
+  t.setup_type=document.getElementById('e-setup').value;
+  saveTrades(trades);closeModal('modal-edit');renderTrades();
+  toast('Trade updated ✓','ok');
+}
+function delTrade(idx){
+  const t=getTrades()[idx];
+  if(!confirm('Delete '+t.ticker+' ('+t.entry_date+')? Cannot be undone.')) return;
+  const trades=getTrades();trades.splice(idx,1);saveTrades(trades);renderTrades();
+  toast('Deleted','ok');
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove('show');
+  closing=null;editing=null;
+}
+
+// ── Export ──
+function exportCSV(type){
+  const all=getTrades();
+  let trades;
+  if(type==='open') trades=all.filter(t=>!t.exit_price&&!t.is_backtest);
+  else if(type==='closed') trades=all.filter(t=>t.exit_price&&!t.is_backtest);
+  else trades=all.filter(t=>t.is_backtest);
+  if(!trades.length){toast('Nothing to export','err');return;}
+  const keys=Object.keys(trades[0]);
+  const rows=[keys.join(','),...trades.map(t=>keys.map(k=>String(t[k]??'')).join(','))];
+  const blob=new Blob([rows.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download=`volstop_${type}_${new Date().toISOString().split('T')[0]}.csv`;a.click();
+}
+
+// ── Toast ──
+function toast(msg,type=''){
+  const el=document.getElementById('toast');
+  el.textContent=msg;el.className='toast show '+(type==='ok'?'ok':type==='err'?'err':'');
+  setTimeout(()=>el.className='toast',3000);
+}
+</script>
+</body>
+</html>
