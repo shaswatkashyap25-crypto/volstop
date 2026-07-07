@@ -379,6 +379,21 @@ function swTab(name,el){
 }
 
 // ── Data fetch ──
+const PROXY='https://yahoo-proxy.shaswatkashyap25.workers.dev/?url=';
+
+async function yahooFetch(url){
+  // Try direct first, then proxy
+  for(const target of [url, PROXY+encodeURIComponent(url)]){
+    try{
+      const r=await fetch(target);
+      if(!r.ok) continue;
+      const j=await r.json();
+      if(j?.chart?.result) return j;
+    }catch(e){}
+  }
+  return null;
+}
+
 async function fetchPrices(ticker, forDate=null){
   const raw=ticker.replace(/\.(NS|BO)$/i,'');
   const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
@@ -388,20 +403,12 @@ async function fetchPrices(ticker, forDate=null){
   const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
   for(const sfx of trySfx){
     const sym=raw+sfx;
-    const urls=[
-      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`,
-      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`,
-    ];
-    for(const url of urls){
-      try{
-        const r=await fetch(url);
-        if(!r.ok) continue;
-        const j=await r.json();
-        const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-        const clean=closes?closes.filter(Boolean):[];
-        if(clean.length>=20) return{sym,closes:clean};
-      }catch(e){}
-    }
+    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`;
+    const j=await yahooFetch(url);
+    if(!j) continue;
+    const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
+    const clean=closes?closes.filter(Boolean):[];
+    if(clean.length>=20) return{sym,closes:clean};
   }
   throw new Error('No data for '+ticker);
 }
@@ -410,12 +417,9 @@ async function fetchLTP(ticker){
   const raw=ticker.replace(/\.(NS|BO)$/i,'');
   const sfx=ticker.match(/\.(NS|BO)$/i)?ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS';
   const sym=raw+sfx;
-  try{
-    const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`);
-    const j=await r.json();
-    const price=j?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return price||null;
-  }catch(e){return null;}
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
+  const j=await yahooFetch(url);
+  return j?.chart?.result?.[0]?.meta?.regularMarketPrice||null;
 }
 
 function logReturns(p){const lr=[];for(let i=1;i<p.length;i++)lr.push(Math.log(p[i]/p[i-1]));return lr;}
