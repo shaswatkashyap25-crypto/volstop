@@ -251,6 +251,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="tc" id="tc-backtest">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('backtest')">Export CSV</button>
+      <button class="exp-btn" onclick="importTGTrades()" style="margin-left:4px;color:var(--accent2);border-color:var(--accent2)">↓ Import TG trades</button>
       <button class="action-btn" onclick="autoCloseBacktest()">⟳ Auto-close backtest trades</button>
     </div>
     <div class="tbl-wrap">
@@ -978,6 +979,52 @@ function closeModal(id){
 }
 
 // ── Export ──
+const TG_TRADES_URL='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv';
+
+async function importTGTrades(){
+  toast('Fetching TG trades…','');
+  try{
+    const r=await fetch(TG_TRADES_URL+'?t='+Date.now());
+    if(!r.ok) throw new Error('Could not fetch TG trades CSV');
+    const text=await r.text();
+    const lines=text.trim().split('\n');
+    if(lines.length<2){toast('No trades in CSV','err');return;}
+    const headers=lines[0].split(',');
+    const rows=lines.slice(1).map(l=>{
+      const vals=l.split(',');
+      const obj={};
+      headers.forEach((h,i)=>obj[h.trim()]=vals[i]?.trim()||'');
+      return obj;
+    });
+    // Show modal to confirm import
+    const msg=`Found ${rows.length} trades from TG channel.\nDate range: ${rows[0]?.entry_date} → ${rows[rows.length-1]?.entry_date}\n\nImport all as backtest trades? Vol data will be fetched when you run auto-close.`;
+    if(!confirm(msg)) return;
+    // Build trade objects — vol data fetched later on auto-close
+    const trades=getTrades();
+    let added=0;
+    for(const row of rows){
+      if(!row.ticker||!row.entry_price) continue;
+      // Skip if already exists
+      const exists=trades.some(t=>t.ticker===row.ticker+'.NS'&&t.entry_date===row.entry_date&&t.is_backtest==='1');
+      if(exists) continue;
+      trades.push({
+        ticker: row.ticker+'.NS',
+        entry_date: row.entry_date,
+        entry_price: parseFloat(row.entry_price),
+        setup_type: 'MOMENTUM', // default, can edit
+        orig_sl: row.orig_sl||'',
+        orig_tgt: row.orig_tgt||'',
+        is_backtest: '1',
+        history_days: '',
+        exit_date:'', exit_price:'', exit_reason:'', log_return:'', auto_closed:''
+      });
+      added++;
+    }
+    saveTrades(trades); renderTrades();
+    toast(`${added} trades imported (${rows.length-added} duplicates skipped)`,'ok');
+  }catch(e){toast('Import failed: '+e.message,'err');}
+}
+
 function exportCSV(type){
   const all=getTrades();
   let trades;
