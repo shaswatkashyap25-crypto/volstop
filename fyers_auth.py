@@ -69,7 +69,9 @@ def step3_verify_pin(request_key):
     data = r.json()
     if data.get('s') == 'error':
         raise Exception(f"verify_pin failed: {r.text}")
-    return data['data']['token'], ses
+    # Response has access_token directly in data, not token
+    token = data['data'].get('token') or data['data'].get('access_token')
+    return token, ses
 
 def step4_get_auth_code(token, ses):
     url = "https://api-t1.fyers.in/api/v3/token"
