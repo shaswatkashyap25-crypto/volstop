@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>VolStop — Forward Test Logger</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -43,13 +43,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .btn-main:disabled{opacity:.4;cursor:not-allowed}
 .btn-sec{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);border-radius:6px;font-family:var(--mono);font-size:12px;cursor:pointer;transition:all .15s}
 .btn-sec:hover{background:#2d1f3a}
-.parsed-list{display:flex;flex-direction:column;gap:8px}
-.parsed-item{background:var(--s2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px}
+.parsed-item{background:var(--s2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px}
 .parsed-item-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .parsed-ticker{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent)}
 .parsed-price{font-family:var(--mono);font-size:11px;color:var(--muted)}
 .parsed-orig{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px}
-.parsed-orig span{color:var(--text)}
 .res-box{background:var(--s2);border:1px solid var(--border2);border-radius:10px;padding:14px;display:none;flex-direction:column;gap:10px}
 .res-box.show{display:flex}
 .res-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -85,11 +83,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 .tc{display:none}
 .tc.active{display:block}
-.tbl-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.tbl-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
 .exp-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer}
 .exp-btn:hover{color:var(--text)}
-.refresh-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--amber);cursor:pointer;margin-left:auto}
-.refresh-btn:hover{background:#2e2514}
+.action-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--amber);cursor:pointer;margin-left:auto}
+.action-btn:hover{background:#2e2514}
 .tbl-wrap{overflow-x:auto}
 .tbl{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap;font-family:var(--mono)}
 .tbl th{text-align:left;padding:7px 9px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border);background:var(--s1);letter-spacing:.5px;position:sticky;top:0}
@@ -123,9 +121,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 @keyframes sp{to{transform:rotate(360deg)}}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
-.divider{height:1px;background:var(--border);margin:2px 0}
 .orig-sl{color:var(--red)}
 .orig-tgt{color:var(--green)}
+.outcome-win{color:var(--green);font-weight:500}
+.outcome-loss{color:var(--red);font-weight:500}
+.outcome-ambig{color:var(--amber)}
 </style>
 </head>
 <body>
@@ -137,8 +137,6 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 
 <div class="layout">
 <aside class="sidebar">
-
-  <!-- Mode switcher -->
   <div>
     <div class="mode-tabs">
       <div class="mode-tab active" id="mode-single" onclick="switchMode('single')">Single Trade</div>
@@ -147,23 +145,21 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   </div>
 
   <!-- SINGLE MODE -->
-  <div id="panel-single">
+  <div id="panel-single" style="display:flex;flex-direction:column;gap:10px">
     <div class="sec-label">New trade</div>
-    <div style="display:flex;flex-direction:column;gap:9px">
-      <div class="field"><label>TICKER</label>
-        <input id="inp-ticker" placeholder="RELIANCE / HDFCBANK" autocomplete="off" onkeydown="if(event.key==='Enter')compute()" />
-      </div>
-      <div class="field"><label>ENTRY PRICE (₹)</label>
-        <input id="inp-price" type="number" placeholder="0.00" step="0.05" onkeydown="if(event.key==='Enter')compute()" />
-      </div>
-      <div class="field"><label>SETUP TYPE</label>
-        <div class="seg">
-          <button id="b-mom" onclick="setSeg('MOMENTUM')">Momentum</button>
-          <button id="b-rev" onclick="setSeg('REVERSAL')">Reversal</button>
-        </div>
-      </div>
-      <button class="btn-main" id="btn-compute" onclick="compute()">Compute stops &amp; targets</button>
+    <div class="field"><label>TICKER</label>
+      <input id="inp-ticker" placeholder="RELIANCE / HDFCBANK" autocomplete="off" onkeydown="if(event.key==='Enter')compute()"/>
     </div>
+    <div class="field"><label>ENTRY PRICE (₹)</label>
+      <input id="inp-price" type="number" placeholder="0.00" step="0.05" onkeydown="if(event.key==='Enter')compute()"/>
+    </div>
+    <div class="field"><label>SETUP TYPE</label>
+      <div class="seg">
+        <button id="b-mom" onclick="setSeg('MOMENTUM')">Momentum</button>
+        <button id="b-rev" onclick="setSeg('REVERSAL')">Reversal</button>
+      </div>
+    </div>
+    <button class="btn-main" id="btn-compute" onclick="compute()">Compute stops &amp; targets</button>
 
     <div class="res-box" id="res-box">
       <div class="res-head">
@@ -190,26 +186,22 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   </div>
 
   <!-- PASTE MODE -->
-  <div id="panel-paste" style="display:none">
+  <div id="panel-paste" style="display:none;flex-direction:column;gap:10px">
     <div class="sec-label">Paste trade messages</div>
-    <div style="display:flex;flex-direction:column;gap:9px">
-      <div class="field">
-        <label>PASTE FROM WHATSAPP / TELEGRAM</label>
-        <textarea id="paste-input" placeholder="[02/07/26, 9:10:31 AM] Ravi: #POSITIONAL&#10;DMART&#10;BUY ABOVE: 4375&#10;SL: 4287 (DAY-CLOSING BASIS)&#10;TGT: 4551&#10;Holding Period: 30 Days&#10;&#10;...paste multiple trades"></textarea>
-      </div>
-      <div class="field">
-        <label>MODE</label>
-        <div class="seg">
-          <button id="p-forward" onclick="setPasteMode('forward')" class="on-mom">Forward Test</button>
-          <button id="p-backtest" onclick="setPasteMode('backtest')">Backtest</button>
-        </div>
-      </div>
-      <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
+    <div class="field">
+      <label>PASTE FROM WHATSAPP / TELEGRAM</label>
+      <textarea id="paste-input" placeholder="#POSITIONAL&#10;DMART&#10;BUY ABOVE: 4375&#10;SL: 4287 (DAY-CLOSING BASIS)&#10;TGT: 4551&#10;Holding Period: 30 Days&#10;&#10;...paste multiple"></textarea>
     </div>
-    <div class="parsed-list" id="parsed-list" style="margin-top:10px"></div>
-    <button class="btn-main" id="btn-log-all" style="display:none;margin-top:10px" onclick="logAllParsed()">↓ Log all trades</button>
+    <div class="field"><label>MODE</label>
+      <div class="seg">
+        <button id="p-forward" onclick="setPasteMode('forward')" class="on-mom">Forward Test</button>
+        <button id="p-backtest" onclick="setPasteMode('backtest')">Backtest</button>
+      </div>
+    </div>
+    <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
+    <div id="parsed-list"></div>
+    <button class="btn-main" id="btn-log-all" style="display:none" onclick="logAllParsed()">↓ Log all trades</button>
   </div>
-
 </aside>
 
 <main class="main">
@@ -217,13 +209,13 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="tab active" onclick="swTab('open',this)">Open trades</div>
     <div class="tab" onclick="swTab('closed',this)">Closed trades</div>
     <div class="tab" onclick="swTab('backtest',this)">Backtest</div>
+    <div class="tab" onclick="swTab('analysis',this)">Analysis</div>
   </div>
 
-  <!-- OPEN -->
   <div class="tc active" id="tc-open">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('open')">Export CSV</button>
-      <button class="refresh-btn" onclick="autoCheck()">⟳ Check prices &amp; auto-close</button>
+      <button class="action-btn" onclick="autoCheck()">⟳ Check prices &amp; auto-close</button>
     </div>
     <div class="tbl-wrap">
       <table class="tbl">
@@ -239,7 +231,6 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     </div>
   </div>
 
-  <!-- CLOSED -->
   <div class="tc" id="tc-closed">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('closed')">Export CSV</button>
@@ -249,6 +240,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
         <thead><tr>
           <th>TICKER</th><th>ENTRY</th><th>EXIT</th>
           <th>ENTRY ₹</th><th>EXIT ₹</th><th>LOG RET</th>
+          <th>ORIG OUTCOME</th><th>VOL OUTCOME</th>
           <th>SETUP</th><th>REASON</th><th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-closed"></tbody>
@@ -256,10 +248,10 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     </div>
   </div>
 
-  <!-- BACKTEST -->
   <div class="tc" id="tc-backtest">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('backtest')">Export CSV</button>
+      <button class="action-btn" onclick="autoCloseBacktest()">⟳ Auto-close backtest trades</button>
     </div>
     <div class="tbl-wrap">
       <table class="tbl">
@@ -267,13 +259,20 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
           <th>TICKER</th><th>DATE</th><th>ENTRY</th><th>SETUP</th>
           <th>ORIG SL</th><th>ORIG TGT</th>
           <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
-          <th>DV20 k2 SL</th><th>DV20 k2 TGT</th>
-          <th>FV20%</th><th>DV20%</th>
-          <th>EXIT ₹</th><th>LOG RET</th><th>ACTIONS</th>
+          <th>EXIT ₹</th><th>LOG RET</th>
+          <th>ORIG OUTCOME</th><th>VOL OUTCOME</th><th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-backtest"></tbody>
       </table>
     </div>
+  </div>
+
+  <div class="tc" id="tc-analysis">
+    <div class="tbl-actions">
+      <button class="exp-btn" onclick="exportAnalysis()">Export Analysis CSV</button>
+      <button class="exp-btn" onclick="exportCSV('all')" style="margin-left:4px">Export Raw Trades CSV</button>
+    </div>
+    <div id="analysis-content"><div class="empty">Close some trades to see analysis.</div></div>
   </div>
 </main>
 </div>
@@ -283,15 +282,15 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="modal">
     <h3 id="modal-close-title">Close trade</h3>
     <div class="modal-form">
-      <div class="field"><label>EXIT PRICE (₹)</label><input id="m-price" type="number" step="0.05" /></div>
-      <div class="field"><label>EXIT DATE</label><input id="m-date" type="date" /></div>
+      <div class="field"><label>EXIT PRICE (₹)</label><input id="m-price" type="number" step="0.05"/></div>
+      <div class="field"><label>EXIT DATE</label><input id="m-date" type="date"/></div>
       <div class="field"><label>EXIT REASON</label>
         <select id="m-reason">
           <option value="TARGET_HIT">Target hit</option>
           <option value="SL_HIT">Stop hit</option>
           <option value="AMBIGUOUS">Ambiguous (SL &amp; target same day)</option>
-          <option value="TIME_EXIT">Time exit (30d)</option>
           <option value="MANUAL">Manual exit</option>
+          <option value="NOT_TRIGGERED">Not triggered</option>
         </select>
       </div>
     </div>
@@ -307,9 +306,9 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="modal">
     <h3>Edit trade</h3>
     <div class="modal-form">
-      <div class="field"><label>TICKER</label><input id="e-ticker" type="text" /></div>
-      <div class="field"><label>ENTRY PRICE (₹)</label><input id="e-price" type="number" step="0.05" /></div>
-      <div class="field"><label>ENTRY DATE</label><input id="e-date" type="date" /></div>
+      <div class="field"><label>TICKER</label><input id="e-ticker" type="text"/></div>
+      <div class="field"><label>ENTRY PRICE (₹)</label><input id="e-price" type="number" step="0.05"/></div>
+      <div class="field"><label>ENTRY DATE</label><input id="e-date" type="date"/></div>
       <div class="field"><label>SETUP TYPE</label>
         <select id="e-setup">
           <option value="MOMENTUM">Momentum</option>
@@ -324,26 +323,6 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   </div>
 </div>
 
-<!-- Setup tag modal for paste -->
-<div class="modal-overlay" id="modal-setup">
-  <div class="modal">
-    <h3 id="modal-setup-title">Tag setup type</h3>
-    <div class="modal-form">
-      <div class="field"><label>SETUP TYPE FOR ALL PARSED TRADES</label>
-        <select id="ms-setup">
-          <option value="MOMENTUM">Momentum</option>
-          <option value="REVERSAL">Reversal</option>
-        </select>
-      </div>
-      <p style="font-size:11px;color:var(--muted);font-family:var(--mono)">You can edit individual trades after logging.</p>
-    </div>
-    <div class="modal-acts">
-      <button class="btn-cancel" onclick="closeModal('modal-setup')">Cancel</button>
-      <button class="btn-confirm" onclick="confirmLogAll()">Log all</button>
-    </div>
-  </div>
-</div>
-
 <div class="toast" id="toast"></div>
 
 <script>
@@ -351,13 +330,186 @@ const LBS=[20,60,252], KS=[1.5,2,2.5,3], HORIZON=30;
 let cur=null, closing=null, editing=null, setup='MOMENTUM', pasteMode='forward';
 let parsedTrades=[];
 
-setSeg('MOMENTUM'); renderTrades();
+// ── Infrastructure ──
+const WORKER='https://yahoo-proxy.shaswatkashyap25.workers.dev';
+let FYERS_TOKEN=null;
 
-// ── Mode & Seg ──
+async function getFyersToken(){
+  if(FYERS_TOKEN) return FYERS_TOKEN;
+  try{
+    const r=await fetch(WORKER+'/token');
+    const j=await r.json();
+    if(j.token){FYERS_TOKEN=j.token;return FYERS_TOKEN;}
+  }catch(e){}
+  return null;
+}
+
+function toFyersSym(ticker){
+  return `NSE:${ticker.replace(/\.(NS|BO)$/i,'').toUpperCase()}-EQ`;
+}
+
+async function fyersFetch(endpoint){
+  const token=await getFyersToken();
+  if(!token) return null;
+  try{
+    const r=await fetch(WORKER+'/fyers'+endpoint);
+    if(!r.ok) return null;
+    return await r.json();
+  }catch(e){return null;}
+}
+
+async function yahooFetch(url){
+  for(const target of [url, WORKER+'/?url='+encodeURIComponent(url)]){
+    try{
+      const r=await fetch(target);
+      if(!r.ok) continue;
+      const j=await r.json();
+      if(j?.chart?.result) return j;
+    }catch(e){}
+  }
+  return null;
+}
+
+async function fetchPrices(ticker, forDate=null){
+  // Fyers first
+  try{
+    const sym=toFyersSym(ticker);
+    const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
+    const start=new Date(end); start.setDate(start.getDate()-420);
+    const j=await fyersFetch(`/api/v3/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${Math.floor(start/1000)}&range_to=${Math.floor(end/1000)}&cont_flag=1`);
+    if(j?.s==='ok'&&j?.candles?.length>=20){
+      return{sym:ticker.replace(/\.(NS|BO)$/i,'')+'.NS', closes:j.candles.map(c=>c[4])};
+    }
+  }catch(e){}
+  // Yahoo fallback
+  const raw=ticker.replace(/\.(NS|BO)$/i,'');
+  const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
+  const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
+  const start=new Date(end); start.setDate(start.getDate()-420);
+  const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
+  for(const sfx of trySfx){
+    const sym=raw+sfx;
+    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
+    if(!j) continue;
+    const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
+    const clean=closes?closes.filter(Boolean):[];
+    if(clean.length>=20) return{sym,closes:clean};
+  }
+  throw new Error('No data for '+ticker);
+}
+
+async function fetchLTP(ticker){
+  try{
+    const j=await fyersFetch(`/api/v3/quotes?symbols=${encodeURIComponent(toFyersSym(ticker))}`);
+    if(j?.s==='ok'&&j?.d?.[0]?.v?.lp) return j.d[0].v.lp;
+  }catch(e){}
+  const raw=ticker.replace(/\.(NS|BO)$/i,'');
+  const sym=raw+(ticker.match(/\.(NS|BO)$/i)?ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS');
+  const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`);
+  return j?.chart?.result?.[0]?.meta?.regularMarketPrice||null;
+}
+
+async function fetchIntraday(ticker, date){
+  // Fetch 1-min candles for a specific date to resolve ambiguous trades
+  try{
+    const sym=toFyersSym(ticker);
+    const d=new Date(date);
+    const p1=Math.floor(d/1000);
+    const p2=p1+86400;
+    const j=await fyersFetch(`/api/v3/history?symbol=${encodeURIComponent(sym)}&resolution=1&date_format=0&range_from=${p1}&range_to=${p2}&cont_flag=1`);
+    if(j?.s==='ok'&&j?.candles?.length>0) return j.candles;
+  }catch(e){}
+  return null;
+}
+
+async function fetchSplitFactor(ticker, entryDate){
+  const raw=ticker.replace(/\.(NS|BO)$/i,'');
+  const sfx=ticker.match(/\.(NS|BO)$/i)?ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS';
+  const sym=raw+sfx;
+  const p1=Math.floor(new Date(entryDate)/1000);
+  const p2=Math.floor(Date.now()/1000);
+  try{
+    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
+    const splits=j?.chart?.result?.[0]?.events?.splits;
+    if(!splits) return 1;
+    let factor=1;
+    Object.values(splits).forEach(s=>{ if(s.date>p1) factor*=(s.numerator/s.denominator); });
+    return factor;
+  }catch(e){return 1;}
+}
+
+// ── Vol Math ──
+function logReturns(p){const lr=[];for(let i=1;i<p.length;i++)lr.push(Math.log(p[i]/p[i-1]));return lr;}
+function fullVol(lr,lb){
+  if(lr.length<lb) return null;
+  const s=lr.slice(-lb),mean=s.reduce((a,b)=>a+b,0)/s.length;
+  return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(252);
+}
+function downVol(lr,lb){
+  if(lr.length<lb) return null;
+  const s=lr.slice(-lb).filter(x=>x<0);
+  if(s.length<5) return fullVol(lr,lb);
+  const mean=s.reduce((a,b)=>a+b,0)/s.length;
+  return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(2)*Math.sqrt(252);
+}
+function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
+function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
+
+// Compute outcomes for all 24 combinations given exit price
+function computeOutcomes(trade, exitPrice){
+  const outcomes={};
+  // Original outcome
+  const origSl=parseFloat(trade.orig_sl), origTgt=parseFloat(trade.orig_tgt);
+  if(origSl&&origTgt){
+    if(exitPrice>=origTgt) outcomes.orig='WIN';
+    else if(exitPrice<=origSl) outcomes.orig='LOSS';
+    else outcomes.orig='MANUAL';
+  }
+  // Vol-based outcomes for all combinations
+  LBS.forEach(lb=>{
+    ['fv','dv'].forEach(vt=>{
+      KS.forEach(k=>{
+        const ks=k.toFixed(1).replace('.','_');
+        const sl=parseFloat(trade[`stop_${vt}_${lb}_k${ks}`]);
+        const tgt=parseFloat(trade[`tgt_${vt}_${lb}_k${ks}`]);
+        if(sl&&tgt){
+          const key=`outcome_${vt}_${lb}_k${ks}`;
+          if(exitPrice>=tgt) outcomes[key]='WIN';
+          else if(exitPrice<=sl) outcomes[key]='LOSS';
+          else outcomes[key]='MANUAL';
+        }
+      });
+    });
+  });
+  return outcomes;
+}
+
+async function computeVol(ticker, entry, setupType, forDate=null){
+  const{sym,closes}=await fetchPrices(ticker, forDate);
+  const lr=logReturns(closes);
+  const d={ticker:sym, entry_price:entry, setup_type:setupType,
+    entry_date:forDate||new Date().toISOString().split('T')[0],
+    history_days:lr.length, orig_sl:'', orig_tgt:'',
+    exit_date:'', exit_price:'', exit_reason:'', log_return:'', auto_closed:''};
+  LBS.forEach(lb=>{
+    const fv=fullVol(lr,lb), dv=downVol(lr,lb);
+    d[`fv_${lb}_ann`]=fv?(fv*100).toFixed(1):null;
+    d[`dv_${lb}_ann`]=dv?(dv*100).toFixed(1):null;
+    KS.forEach(k=>{
+      const ks=k.toFixed(1).replace('.','_');
+      d[`stop_fv_${lb}_k${ks}`]=fv?stopPx(entry,fv,k):null;
+      d[`tgt_fv_${lb}_k${ks}`]=fv?tgtPx(entry,fv,k):null;
+      d[`stop_dv_${lb}_k${ks}`]=dv?stopPx(entry,dv,k):null;
+      d[`tgt_dv_${lb}_k${ks}`]=dv?tgtPx(entry,dv,k):null;
+    });
+  });
+  return d;
+}
+
+// ── UI ──
 function switchMode(m){
   document.getElementById('panel-single').style.display=m==='single'?'flex':'none';
-  if(m==='single') document.getElementById('panel-single').style.flexDirection='column';
-  document.getElementById('panel-paste').style.display=m==='paste'?'block':'none';
+  document.getElementById('panel-paste').style.display=m==='paste'?'flex':'none';
   document.getElementById('mode-single').classList.toggle('active',m==='single');
   document.getElementById('mode-paste').classList.toggle('active',m==='paste');
 }
@@ -376,103 +528,20 @@ function swTab(name,el){
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('tc-'+name).classList.add('active');
+  if(name==='analysis') renderAnalysis();
 }
 
-// ── Data fetch ──
-const PROXY='https://yahoo-proxy.shaswatkashyap25.workers.dev/?url=';
-
-async function yahooFetch(url){
-  // Try direct first, then proxy
-  for(const target of [url, PROXY+encodeURIComponent(url)]){
-    try{
-      const r=await fetch(target);
-      if(!r.ok) continue;
-      const j=await r.json();
-      if(j?.chart?.result) return j;
-    }catch(e){}
-  }
-  return null;
-}
-
-async function fetchPrices(ticker, forDate=null){
-  const raw=ticker.replace(/\.(NS|BO)$/i,'');
-  const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
-  const end=forDate?new Date(forDate):new Date();
-  end.setDate(end.getDate()+2);
-  const start=new Date(end); start.setDate(start.getDate()-420);
-  const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
-  for(const sfx of trySfx){
-    const sym=raw+sfx;
-    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`;
-    const j=await yahooFetch(url);
-    if(!j) continue;
-    const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-    const clean=closes?closes.filter(Boolean):[];
-    if(clean.length>=20) return{sym,closes:clean};
-  }
-  throw new Error('No data for '+ticker);
-}
-
-async function fetchLTP(ticker){
-  const raw=ticker.replace(/\.(NS|BO)$/i,'');
-  const sfx=ticker.match(/\.(NS|BO)$/i)?ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS';
-  const sym=raw+sfx;
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
-  const j=await yahooFetch(url);
-  return j?.chart?.result?.[0]?.meta?.regularMarketPrice||null;
-}
-
-function logReturns(p){const lr=[];for(let i=1;i<p.length;i++)lr.push(Math.log(p[i]/p[i-1]));return lr;}
-function fullVol(lr,lb){
-  if(lr.length<lb) return null;
-  const s=lr.slice(-lb),mean=s.reduce((a,b)=>a+b,0)/s.length;
-  return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(252);
-}
-function downVol(lr,lb){
-  if(lr.length<lb) return null;
-  const s=lr.slice(-lb).filter(x=>x<0);
-  if(s.length<5) return fullVol(lr,lb);
-  const mean=s.reduce((a,b)=>a+b,0)/s.length;
-  return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(2)*Math.sqrt(252);
-}
-function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
-function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
-
-async function computeVol(ticker, entry, setupType, forDate=null){
-  const{sym,closes}=await fetchPrices(ticker, forDate);
-  const lr=logReturns(closes);
-  const d={ticker:sym,entry_price:entry,setup_type:setupType,
-    entry_date:forDate||new Date().toISOString().split('T')[0],
-    history_days:lr.length,
-    orig_sl:'',orig_tgt:'',
-    exit_date:'',exit_price:'',exit_reason:'',log_return:'',auto_closed:''};
-  LBS.forEach(lb=>{
-    const fv=fullVol(lr,lb),dv=downVol(lr,lb);
-    d[`fv_${lb}_ann`]=fv?(fv*100).toFixed(1):null;
-    d[`dv_${lb}_ann`]=dv?(dv*100).toFixed(1):null;
-    KS.forEach(k=>{
-      const ks=k.toFixed(1).replace('.','_');
-      d[`stop_fv_${lb}_k${ks}`]=fv?stopPx(entry,fv,k):null;
-      d[`tgt_fv_${lb}_k${ks}`]=fv?tgtPx(entry,fv,k):null;
-      d[`stop_dv_${lb}_k${ks}`]=dv?stopPx(entry,dv,k):null;
-      d[`tgt_dv_${lb}_k${ks}`]=dv?tgtPx(entry,dv,k):null;
-    });
-  });
-  return d;
-}
-
-// ── Single compute ──
 async function compute(){
   const ticker=document.getElementById('inp-ticker').value.trim().toUpperCase();
   const entry=parseFloat(document.getElementById('inp-price').value);
   if(!ticker||!entry){toast('Enter ticker and entry price','err');return;}
   const btn=document.getElementById('btn-compute');
-  btn.disabled=true;btn.innerHTML='<span class="spin"></span>Fetching…';
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>Fetching…';
   try{
     const d=await computeVol(ticker,entry,setup);
-    cur=d;renderResult(d);
+    cur=d; renderResult(d);
   }catch(e){toast(e.message,'err');}
-  finally{btn.disabled=false;btn.innerHTML='Compute stops &amp; targets';}
+  finally{btn.disabled=false; btn.innerHTML='Compute stops &amp; targets';}
 }
 
 function fmt(v,dec=2){
@@ -484,7 +553,7 @@ function renderResult(d){
   document.getElementById('res-tkr').textContent=d.ticker;
   document.getElementById('res-ep').textContent='@ ₹'+fmt(d.entry_price);
   const b=document.getElementById('res-badge');
-  b.textContent=d.setup_type;b.className='badge badge-'+(d.setup_type==='MOMENTUM'?'mom':'rev');
+  b.textContent=d.setup_type; b.className='badge badge-'+(d.setup_type==='MOMENTUM'?'mom':'rev');
   const note=document.getElementById('history-note');
   if(d.history_days<252){
     const missing=LBS.filter(lb=>d.history_days<lb);
@@ -513,23 +582,18 @@ function renderResult(d){
   document.getElementById('res-box').classList.add('show');
 }
 
-// ── Paste parser ──
+// ── Paste ──
 function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
   const blocks=text.split(/#POSITIONAL/i).filter(b=>b.trim());
   parsedTrades=[];
-  const list=document.getElementById('parsed-list');
-  list.innerHTML='';
+  document.getElementById('parsed-list').innerHTML='';
   blocks.forEach((block,i)=>{
     const lines=block.split(/\n/).map(l=>l.trim()).filter(Boolean);
-    // Extract date from preceding timestamp if present
-    const dateMatch=text.match(/\[(\d{2})\/(\d{2})\/(\d{2}),\s*\d+:\d+/);
+    const dateMatch=text.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
     let entryDate=new Date().toISOString().split('T')[0];
-    if(dateMatch){
-      entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-    }
-    // Find ticker (first non-empty line after splitting)
+    if(dateMatch) entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
     const ticker=lines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
     const buyLine=lines.find(l=>/BUY ABOVE/i.test(l));
     const slLine=lines.find(l=>/^SL:/i.test(l));
@@ -542,26 +606,15 @@ function parsePaste(){
     parsedTrades.push({ticker,entry,origSl,origTgt,entryDate,setup:'MOMENTUM'});
     const el=document.createElement('div');
     el.className='parsed-item';
-    el.innerHTML=`
-      <div class="parsed-item-head">
-        <span class="parsed-ticker">${ticker}</span>
-        <span class="parsed-price">₹${entry}</span>
-      </div>
-      <div class="parsed-orig">
-        SL <span class="orig-sl">${origSl?'₹'+origSl:'—'}</span> &nbsp;
-        TGT <span class="orig-tgt">${origTgt?'₹'+origTgt:'—'}</span> &nbsp;
-        Date <span>${entryDate}</span>
-      </div>
-      <div class="field">
-        <label>SETUP</label>
-        <div class="seg">
-          <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="on-mom">Momentum</button>
-          <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')">Reversal</button>
-        </div>
-      </div>`;
-    list.appendChild(el);
+    el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${ticker}</span><span class="parsed-price">₹${entry}</span></div>
+      <div class="parsed-orig">SL <span class="orig-sl">${origSl?'₹'+origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${origTgt?'₹'+origTgt:'—'}</span> &nbsp; ${entryDate}</div>
+      <div class="field"><label>SETUP</label><div class="seg">
+        <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="on-mom">Momentum</button>
+        <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')">Reversal</button>
+      </div></div>`;
+    document.getElementById('parsed-list').appendChild(el);
   });
-  if(parsedTrades.length===0){toast('No trades found — check the format','err');return;}
+  if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
   document.getElementById('btn-log-all').style.display='block';
 }
@@ -575,80 +628,158 @@ function setParsedSetup(i,val){
 async function logAllParsed(){
   if(!parsedTrades.length) return;
   const btn=document.getElementById('btn-log-all');
-  btn.disabled=true;btn.innerHTML='<span class="spin"></span>Fetching vol data…';
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>Fetching vol data…';
   const isBacktest=pasteMode==='backtest';
   const trades=getTrades();
   let success=0,fail=0;
   for(const p of parsedTrades){
     try{
       const d=await computeVol(p.ticker,p.entry,p.setup,p.entryDate);
-      d.orig_sl=p.origSl||'';
-      d.orig_tgt=p.origTgt||'';
+      d.orig_sl=p.origSl||''; d.orig_tgt=p.origTgt||'';
       d.is_backtest=isBacktest?'1':'';
-      trades.push(d);
-      success++;
+      trades.push(d); success++;
     }catch(e){fail++;}
   }
-  saveTrades(trades);
-  renderTrades();
+  saveTrades(trades); renderTrades();
   toast(`${success} logged${fail?', '+fail+' failed':''}`,success>0?'ok':'err');
-  btn.disabled=false;btn.innerHTML='↓ Log all trades';
+  btn.disabled=false; btn.innerHTML='↓ Log all trades';
   document.getElementById('parsed-list').innerHTML='';
   document.getElementById('btn-log-all').style.display='none';
   document.getElementById('paste-input').value='';
   parsedTrades=[];
 }
 
-// ── Single log ──
 function logTrade(){
   if(!cur) return;
-  const trades=getTrades();trades.push({...cur});saveTrades(trades);
-  toast('Trade logged ✓','ok');renderTrades();
+  const trades=getTrades(); trades.push({...cur}); saveTrades(trades);
+  toast('Trade logged ✓','ok'); renderTrades();
 }
 
-// ── Auto-close ──
+// ── Auto close (forward) ──
 async function autoCheck(){
   const trades=getTrades();
   const open=trades.filter(t=>!t.exit_price&&!t.is_backtest);
-  if(!open.length){toast('No open trades to check','ok');return;}
-  toast('Checking prices…','');
-  let closed=0;
+  if(!open.length){toast('No open trades','ok');return;}
+  toast('Checking splits & prices…','');
   const today=new Date().toISOString().split('T')[0];
+  let closed=0;
   for(const t of open){
+    // Adjust splits first
+    const factor=await fetchSplitFactor(t.ticker,t.entry_date);
+    if(factor!==1&&t.split_adjusted!==String(factor)){
+      t.entry_price=parseFloat((parseFloat(t.entry_price)/factor).toFixed(2));
+      ['stop_fv','tgt_fv','stop_dv','tgt_dv'].forEach(pre=>{
+        LBS.forEach(lb=>KS.forEach(k=>{
+          const ks=k.toFixed(1).replace('.','_'), key=`${pre}_${lb}_k${ks}`;
+          if(t[key]) t[key]=parseFloat((parseFloat(t[key])/factor).toFixed(2));
+        }));
+      });
+      if(t.orig_sl) t.orig_sl=parseFloat((parseFloat(t.orig_sl)/factor).toFixed(2));
+      if(t.orig_tgt) t.orig_tgt=parseFloat((parseFloat(t.orig_tgt)/factor).toFixed(2));
+      t.split_adjusted=String(factor);
+    }
+    // Check LTP
     const ltp=await fetchLTP(t.ticker);
     if(!ltp) continue;
     const sl=parseFloat(t['stop_fv_20_k2_0']);
     const tgt=parseFloat(t['tgt_fv_20_k2_0']);
-    const orig_sl=parseFloat(t.orig_sl);
-    const orig_tgt=parseFloat(t.orig_tgt);
-    // Check vol-based stops first, then original
     let reason=null;
     if(tgt&&ltp>=tgt) reason='TARGET_HIT';
     else if(sl&&ltp<=sl) reason='SL_HIT';
-    else if(orig_tgt&&ltp>=orig_tgt) reason='TARGET_HIT';
-    else if(orig_sl&&ltp<=orig_sl) reason='SL_HIT';
     if(reason){
-      t.exit_price=ltp;t.exit_date=today;t.exit_reason=reason;t.auto_closed='1';
+      t.exit_price=ltp; t.exit_date=today; t.exit_reason=reason; t.auto_closed='1';
       t.log_return=Math.log(ltp/parseFloat(t.entry_price)).toFixed(6);
+      const outcomes=computeOutcomes(t,ltp);
+      Object.assign(t,outcomes);
       closed++;
     }
   }
-  saveTrades(trades);renderTrades();
-  toast(closed?`${closed} trade${closed>1?'s':''} auto-closed`:'All trades still open','ok');
+  saveTrades(trades); renderTrades();
+  toast(closed?`${closed} auto-closed`:'All still open','ok');
+}
+
+// ── Backtest auto-close ──
+async function autoCloseBacktest(){
+  const trades=getTrades();
+  const open=trades.filter(t=>!t.exit_price&&t.is_backtest);
+  if(!open.length){toast('No open backtest trades','ok');return;}
+  toast('Running backtest closure…','');
+  let closed=0, failed=0;
+  for(const t of open){
+    try{
+      const raw=t.ticker.replace(/\.(NS|BO)$/i,'');
+      const sfx=t.ticker.match(/\.(NS|BO)$/i)?t.ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS';
+      const sym=raw+sfx;
+      const p1=Math.floor(new Date(t.entry_date)/1000);
+      const p2=Math.floor(Date.now()/1000);
+      const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
+      if(!j){failed++;continue;}
+      const result=j.chart.result[0];
+      const timestamps=result.timestamp;
+      const highs=result.indicators.quote[0].high;
+      const lows=result.indicators.quote[0].low;
+      const closes=result.indicators.quote[0].close;
+      // Use FV20 k2 as primary vol-based levels
+      const volSl=parseFloat(t['stop_fv_20_k2_0'])||parseFloat(t.orig_sl)||null;
+      const volTgt=parseFloat(t['tgt_fv_20_k2_0'])||parseFloat(t.orig_tgt)||null;
+      if(!volSl&&!volTgt){failed++;continue;}
+      let exitDate=null,exitPrice=null,exitReason=null;
+      for(let i=1;i<timestamps.length;i++){
+        const high=highs[i],low=lows[i],close=closes[i];
+        if(!high||!low||!close) continue;
+        const date=new Date(timestamps[i]*1000).toISOString().split('T')[0];
+        const slHit=volSl&&low<=volSl;
+        const tgtHit=volTgt&&high>=volTgt;
+        if(slHit&&tgtHit){
+          // Ambiguous day — try Fyers intraday to resolve
+          const intraday=await fetchIntraday(t.ticker,date);
+          if(intraday){
+            let resolved=false;
+            for(const candle of intraday){
+              const cHigh=candle[2],cLow=candle[3];
+              if(volTgt&&cHigh>=volTgt){exitDate=date;exitPrice=volTgt;exitReason='TARGET_HIT';resolved=true;break;}
+              if(volSl&&cLow<=volSl){exitDate=date;exitPrice=volSl;exitReason='SL_HIT';resolved=true;break;}
+            }
+            if(!resolved){exitDate=date;exitPrice=close;exitReason='AMBIGUOUS';}
+          }else{
+            exitDate=date;exitPrice=close;exitReason='AMBIGUOUS';
+          }
+          break;
+        }else if(tgtHit){exitDate=date;exitPrice=volTgt;exitReason='TARGET_HIT';break;}
+        else if(slHit){exitDate=date;exitPrice=volSl;exitReason='SL_HIT';break;}
+      }
+      if(exitDate){
+        t.exit_date=exitDate; t.exit_price=exitPrice; t.exit_reason=exitReason;
+        t.log_return=Math.log(exitPrice/parseFloat(t.entry_price)).toFixed(6);
+        const outcomes=computeOutcomes(t,exitPrice);
+        Object.assign(t,outcomes);
+        closed++;
+      }
+    }catch(e){failed++;}
+  }
+  saveTrades(trades); renderTrades();
+  toast(`${closed} closed${failed?' ('+failed+' failed)':''}`,closed>0?'ok':'err');
 }
 
 // ── Storage ──
-function getTrades(){try{return JSON.parse(localStorage.getItem('volstop_v4')||'[]')}catch{return[]}}
-function saveTrades(t){localStorage.setItem('volstop_v4',JSON.stringify(t))}
+function getTrades(){try{return JSON.parse(localStorage.getItem('volstop_v5')||'[]')}catch{return[]}}
+function saveTrades(t){localStorage.setItem('volstop_v5',JSON.stringify(t))}
 
 // ── Render ──
+function outcomeCell(val){
+  if(!val) return '<td>—</td>';
+  if(val==='WIN') return`<td class="outcome-win">WIN</td>`;
+  if(val==='LOSS') return`<td class="outcome-loss">LOSS</td>`;
+  if(val==='AMBIGUOUS') return`<td class="outcome-ambig">AMBIG</td>`;
+  return`<td class="c-ambig">${val}</td>`;
+}
+
 function renderTrades(){
   const all=getTrades();
   const open=all.filter(t=>!t.exit_price&&!t.is_backtest);
   const closed=all.filter(t=>t.exit_price&&!t.is_backtest);
   const backtest=all.filter(t=>t.is_backtest);
 
-  // Open
   const ot=document.getElementById('tb-open');
   ot.innerHTML=open.length?open.map(t=>`<tr>
     <td class="c-open">${t.ticker}</td>
@@ -670,16 +801,17 @@ function renderTrades(){
     </td>
   </tr>`).join(''):`<tr><td colspan="13"><div class="empty">No open trades.</div></td></tr>`;
 
-  // Closed
   const ct=document.getElementById('tb-closed');
   ct.innerHTML=closed.length?closed.map(t=>{
     const lr=parseFloat(t.log_return);
-    const cls=t.exit_reason==='AMBIGUOUS'?'c-ambig':t.log_return?(lr>=0?'c-win':'c-loss'):'';
+    const cls=t.log_return?(lr>=0?'c-win':'c-loss'):'';
     return`<tr>
       <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}</td>
       <td>${t.entry_date}</td><td>${t.exit_date||'—'}</td>
       <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.exit_price)}</td>
       <td class="${cls}">${t.log_return?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
+      ${outcomeCell(t.orig)}
+      ${outcomeCell(t['outcome_fv_20_k2_0'])}
       <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
       <td style="font-size:10px;color:var(--muted)">${t.exit_reason||'—'}</td>
       <td>
@@ -687,9 +819,8 @@ function renderTrades(){
         <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
       </td>
     </tr>`;
-  }).join(''):`<tr><td colspan="9"><div class="empty">No closed trades.</div></td></tr>`;
+  }).join(''):`<tr><td colspan="11"><div class="empty">No closed trades.</div></td></tr>`;
 
-  // Backtest
   const bt=document.getElementById('tb-backtest');
   bt.innerHTML=backtest.length?backtest.map(t=>{
     const lr=parseFloat(t.log_return);
@@ -702,18 +833,95 @@ function renderTrades(){
       <td class="orig-tgt">${t.orig_tgt?'₹'+fmt(t.orig_tgt):'—'}</td>
       <td class="fv-val">₹${fmt(t['stop_fv_20_k2_0'])}</td>
       <td class="tgt-val">₹${fmt(t['tgt_fv_20_k2_0'])}</td>
-      <td class="dv-val">₹${fmt(t['stop_dv_20_k2_0'])}</td>
-      <td class="tgt-val">₹${fmt(t['tgt_dv_20_k2_0'])}</td>
-      <td class="fv-val">${t['fv_20_ann']??'—'}%</td>
-      <td class="dv-val">${t['dv_20_ann']??'—'}%</td>
       <td>₹${fmt(t.exit_price)}</td>
       <td class="${cls}">${t.log_return?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
+      ${outcomeCell(t.orig)}
+      ${outcomeCell(t['outcome_fv_20_k2_0'])}
       <td>
         <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
+        ${!t.exit_price?`<button class="btn-close-tr" onclick="openClose(${all.indexOf(t)})">Close</button>`:''}
         <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
       </td>
     </tr>`;
-  }).join(''):`<tr><td colspan="15"><div class="empty">No backtest trades. Use Paste &amp; Log → Backtest mode.</div></td></tr>`;
+  }).join(''):`<tr><td colspan="13"><div class="empty">No backtest trades.</div></td></tr>`;
+}
+
+// ── Analysis ──
+function renderAnalysis(){
+  const all=getTrades().filter(t=>t.exit_price&&t.exit_reason!=='MANUAL'&&t.exit_reason!=='NOT_TRIGGERED');
+  if(!all.length){document.getElementById('analysis-content').innerHTML='<div class="empty">Close some trades to see analysis.</div>';return;}
+
+  // Build combination list
+  const combos=[];
+  combos.push({key:'orig',label:'Original SL/TGT'});
+  LBS.forEach(lb=>['fv','dv'].forEach(vt=>KS.forEach(k=>{
+    const ks=k.toFixed(1).replace('.','_');
+    combos.push({key:`outcome_${vt}_${lb}_k${ks}`,label:`${vt.toUpperCase()} ${lb}d k${k}`});
+  })));
+
+  // Compute stats per combination × setup type
+  const setupTypes=['ALL','MOMENTUM','REVERSAL'];
+  let html=`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
+    <th>COMBINATION</th>
+    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
+    <th>MOM — WIN%</th><th>MOM — AVG RET</th>
+    <th>REV — WIN%</th><th>REV — AVG RET</th>
+  </tr></thead><tbody>`;
+
+  combos.forEach(c=>{
+    const rows=all.filter(t=>t[c.key]);
+    const mom=rows.filter(t=>t.setup_type==='MOMENTUM');
+    const rev=rows.filter(t=>t.setup_type==='REVERSAL');
+
+    function stats(arr){
+      if(!arr.length) return{wr:'—',avgRet:'—',n:0};
+      const wins=arr.filter(t=>t[c.key]==='WIN').length;
+      const wr=((wins/arr.length)*100).toFixed(1)+'%';
+      const avgRet=(arr.reduce((s,t)=>s+parseFloat(t.log_return||0),0)/arr.length*100).toFixed(2)+'%';
+      return{wr,avgRet,n:arr.length};
+    }
+
+    const a=stats(rows),m=stats(mom),r=stats(rev);
+    const isOrig=c.key==='orig';
+    html+=`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">
+      <td style="font-family:var(--mono);font-size:11px">${c.label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(a.wr)>=50?'var(--green)':'var(--red)'}">${a.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(a.avgRet)>=0?'var(--green)':'var(--red)'}">${a.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${a.n}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(m.wr)>=50?'var(--green)':'var(--red)'}">${m.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(m.avgRet)>=0?'var(--green)':'var(--red)'}">${m.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(r.wr)>=50?'var(--green)':'var(--red)'}">${r.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(r.avgRet)>=0?'var(--green)':'var(--red)'}">${r.avgRet}</td>
+    </tr>`;
+  });
+  html+='</tbody></table></div>';
+  document.getElementById('analysis-content').innerHTML=html;
+}
+
+function exportAnalysis(){
+  const all=getTrades().filter(t=>t.exit_price&&t.exit_reason!=='MANUAL'&&t.exit_reason!=='NOT_TRIGGERED');
+  if(!all.length){toast('No closed trades to analyse','err');return;}
+  const combos=[];
+  combos.push({key:'orig',label:'Original SL/TGT'});
+  LBS.forEach(lb=>['fv','dv'].forEach(vt=>KS.forEach(k=>{
+    const ks=k.toFixed(1).replace('.','_');
+    combos.push({key:`outcome_${vt}_${lb}_k${ks}`,label:`${vt.toUpperCase()} ${lb}d k${k}`});
+  })));
+  const headers=['Combination','Setup','N','Wins','Win%','Avg Log Return%'];
+  const rows=[headers.join(',')];
+  ['ALL','MOMENTUM','REVERSAL'].forEach(st=>{
+    combos.forEach(c=>{
+      const arr=all.filter(t=>t[c.key]&&(st==='ALL'||t.setup_type===st));
+      if(!arr.length) return;
+      const wins=arr.filter(t=>t[c.key]==='WIN').length;
+      const wr=((wins/arr.length)*100).toFixed(1);
+      const avgRet=(arr.reduce((s,t)=>s+parseFloat(t.log_return||0),0)/arr.length*100).toFixed(2);
+      rows.push([c.label,st,arr.length,wins,wr,avgRet].join(','));
+    });
+  });
+  const blob=new Blob([rows.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`volstop_analysis_${new Date().toISOString().split('T')[0]}.csv`; a.click();
 }
 
 // ── Modals ──
@@ -731,10 +939,12 @@ function confirmClose(){
   const ed=document.getElementById('m-date').value;
   const er=document.getElementById('m-reason').value;
   if(!ep||!ed){toast('Fill all fields','err');return;}
-  const trades=getTrades();const t=trades[closing];
-  t.exit_price=ep;t.exit_date=ed;t.exit_reason=er;t.auto_closed='';
+  const trades=getTrades(); const t=trades[closing];
+  t.exit_price=ep; t.exit_date=ed; t.exit_reason=er; t.auto_closed='';
   t.log_return=Math.log(ep/parseFloat(t.entry_price)).toFixed(6);
-  saveTrades(trades);closeModal('modal-close');renderTrades();
+  const outcomes=computeOutcomes(t,ep);
+  Object.assign(t,outcomes);
+  saveTrades(trades); closeModal('modal-close'); renderTrades();
   toast('Trade closed ✓','ok');
 }
 function openEdit(idx){
@@ -748,23 +958,23 @@ function openEdit(idx){
 }
 function confirmEdit(){
   if(editing===null) return;
-  const trades=getTrades();const t=trades[editing];
+  const trades=getTrades(); const t=trades[editing];
   t.ticker=document.getElementById('e-ticker').value.trim().toUpperCase();
   t.entry_price=parseFloat(document.getElementById('e-price').value);
   t.entry_date=document.getElementById('e-date').value;
   t.setup_type=document.getElementById('e-setup').value;
-  saveTrades(trades);closeModal('modal-edit');renderTrades();
+  saveTrades(trades); closeModal('modal-edit'); renderTrades();
   toast('Trade updated ✓','ok');
 }
 function delTrade(idx){
   const t=getTrades()[idx];
-  if(!confirm('Delete '+t.ticker+' ('+t.entry_date+')? Cannot be undone.')) return;
-  const trades=getTrades();trades.splice(idx,1);saveTrades(trades);renderTrades();
+  if(!confirm(`Delete ${t.ticker} (${t.entry_date})?`)) return;
+  const trades=getTrades(); trades.splice(idx,1); saveTrades(trades); renderTrades();
   toast('Deleted','ok');
 }
 function closeModal(id){
   document.getElementById(id).classList.remove('show');
-  closing=null;editing=null;
+  closing=null; editing=null;
 }
 
 // ── Export ──
@@ -773,21 +983,23 @@ function exportCSV(type){
   let trades;
   if(type==='open') trades=all.filter(t=>!t.exit_price&&!t.is_backtest);
   else if(type==='closed') trades=all.filter(t=>t.exit_price&&!t.is_backtest);
-  else trades=all.filter(t=>t.is_backtest);
+  else if(type==='backtest') trades=all.filter(t=>t.is_backtest);
+  else trades=all;
   if(!trades.length){toast('Nothing to export','err');return;}
   const keys=Object.keys(trades[0]);
   const rows=[keys.join(','),...trades.map(t=>keys.map(k=>String(t[k]??'')).join(','))];
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download=`volstop_${type}_${new Date().toISOString().split('T')[0]}.csv`;a.click();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`volstop_${type}_${new Date().toISOString().split('T')[0]}.csv`; a.click();
 }
 
-// ── Toast ──
 function toast(msg,type=''){
   const el=document.getElementById('toast');
-  el.textContent=msg;el.className='toast show '+(type==='ok'?'ok':type==='err'?'err':'');
+  el.textContent=msg; el.className='toast show '+(type==='ok'?'ok':type==='err'?'err':'');
   setTimeout(()=>el.className='toast',3000);
 }
+
+setSeg('MOMENTUM'); renderTrades();
 </script>
 </body>
 </html>
