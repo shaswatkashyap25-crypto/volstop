@@ -587,15 +587,25 @@ async function logSingleTrade(){
 function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
-  const blocks=text.split(/#POSITIONAL/i).filter(b=>b.trim());
+  // Split on any of the three tags, keeping the tag attached to the start of
+  // its block — a block can be introduced by #POSITIONAL, #REVERSAL, or
+  // #MOMENTUM (or more than one together on nearby lines).
+  const blocks=text.split(/(?=#(?:POSITIONAL|REVERSAL|MOMENTUM))/i).filter(b=>b.trim());
   parsedTrades=[];
   document.getElementById('parsed-list').innerHTML='';
   blocks.forEach((block)=>{
+    if(!/#(POSITIONAL|REVERSAL|MOMENTUM)/i.test(block)) return; // stray text before the first tag
     const lines=block.split(/\n/).map(l=>l.trim()).filter(Boolean);
-    const dateMatch=text.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
+    const dateMatch=block.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
     let entryDate=new Date().toISOString().split('T')[0];
     if(dateMatch) entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
-    const ticker=lines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
+    // setup type: #REVERSAL or #MOMENTUM if present anywhere in the block;
+    // if only #POSITIONAL, leave blank rather than guess.
+    let setupType=null;
+    if(/#REVERSAL/i.test(block)) setupType='REVERSAL';
+    else if(/#MOMENTUM/i.test(block)) setupType='MOMENTUM';
+    const ticker=lines[0]?.replace(/#(POSITIONAL|REVERSAL|MOMENTUM)/gi,'').replace(/[^A-Z0-9&]/gi,'').toUpperCase()
+      ||lines[1]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
     const buyLine=lines.find(l=>/BUY ABOVE/i.test(l));
     const slLine=lines.find(l=>/^SL:/i.test(l));
     const tgtLine=lines.find(l=>/^TGT:/i.test(l));
@@ -604,7 +614,7 @@ function parsePaste(){
     const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
     const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
     if(!entry||isNaN(entry)) return;
-    addParsedItem({ticker,entry,origSl,origTgt,entryDate,setup:'MOMENTUM'});
+    addParsedItem({ticker,entry,origSl,origTgt,entryDate,setup:setupType});
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
@@ -639,7 +649,7 @@ async function fetchTGTrades(){
         ticker:row.ticker, entry:parseFloat(row.entry_price),
         origSl:row.orig_sl?parseFloat(row.orig_sl):null,
         origTgt:row.orig_tgt?parseFloat(row.orig_tgt):null,
-        entryDate:row.entry_date, setup:'MOMENTUM'
+        entryDate:row.entry_date, setup:row.setup_type||null
       });
       added++;
     }
@@ -657,9 +667,10 @@ function addParsedItem(p){
   el.id=`parsed-${i}`;
   el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span></div>
     <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}</div>
+    ${!p.setup?'<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px">No setup tag found — pick one below</div>':''}
     <div class="field"><label>SETUP</label><div class="seg">
-      <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="on-mom">Momentum</button>
-      <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')">Reversal</button>
+      <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
+      <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')" class="${p.setup==='REVERSAL'?'on-rev':''}">Reversal</button>
     </div></div>`;
   document.getElementById('parsed-list').appendChild(el);
 }
