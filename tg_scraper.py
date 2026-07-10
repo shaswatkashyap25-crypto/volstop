@@ -20,6 +20,12 @@ CHANNEL_ID  = int(os.environ.get('TG_CHANNEL_ID', '-1002940195231'))
 OUTPUT_FILE = 'tg_trades.csv'
 STATE_FILE  = 'tg_scraper_state.json'
 
+# A message is a trade if it carries ANY of these tags. #REVERSAL and
+# #MOMENTUM also tell us the setup type directly — no more guessing/manual
+# tagging later. If only #POSITIONAL appears with neither, setup_type comes
+# back blank rather than a guessed default, since we don't actually know it.
+TAG_PATTERN = re.compile(r'#(POSITIONAL|REVERSAL|MOMENTUM)', re.IGNORECASE)
+
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f:
@@ -31,13 +37,22 @@ def save_state(state):
         json.dump(state, f)
 
 def parse_trade(text, date, msg_id):
-    if '#POSITIONAL' not in text.upper():
+    tags_found = {m.group(1).upper() for m in TAG_PATTERN.finditer(text)}
+    if not tags_found:
         return None
+
+    if 'REVERSAL' in tags_found:
+        setup_type = 'REVERSAL'
+    elif 'MOMENTUM' in tags_found:
+        setup_type = 'MOMENTUM'
+    else:
+        setup_type = ''  # only #POSITIONAL seen — genuinely unknown, left blank on purpose
+
     lines = [l.strip() for l in text.strip().split('\n') if l.strip()]
     ticker = None
     for i, line in enumerate(lines):
-        if '#POSITIONAL' in line.upper():
-            rest = re.sub(r'#POSITIONAL', '', line, flags=re.IGNORECASE).strip()
+        if TAG_PATTERN.search(line):
+            rest = TAG_PATTERN.sub('', line).strip()
             rest = re.sub(r'[^A-Z0-9&]', '', rest.upper())
             if rest:
                 ticker = rest
@@ -64,6 +79,7 @@ def parse_trade(text, date, msg_id):
     return {
         'msg_id':      msg_id,
         'ticker':      ticker,
+        'setup_type':  setup_type,
         'entry_date':  date.strftime('%Y-%m-%d'),
         'entry_time':  date.strftime('%H:%M'),
         'entry_price': buy_above,
@@ -106,7 +122,7 @@ async def scrape():
         print(f"Messages scanned: {total}, New trades found: {len(new_trades)}")
         if new_trades:
             new_trades.sort(key=lambda x: (x['entry_date'], x['entry_time']))
-            fields = ['msg_id','ticker','entry_date','entry_time','entry_price','orig_sl','orig_tgt','raw_message']
+            fields = ['msg_id','ticker','setup_type','entry_date','entry_time','entry_price','orig_sl','orig_tgt','raw_message']
             file_exists = os.path.exists(OUTPUT_FILE)
             with open(OUTPUT_FILE, 'a', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fields)
@@ -117,7 +133,7 @@ async def scrape():
         else:
             if not os.path.exists(OUTPUT_FILE):
                 with open(OUTPUT_FILE, 'w', newline='') as f:
-                    csv.DictWriter(f, fieldnames=['msg_id','ticker','entry_date','entry_time','entry_price','orig_sl','orig_tgt','raw_message']).writeheader()
+                    csv.DictWriter(f, fieldnames=['msg_id','ticker','setup_type','entry_date','entry_time','entry_price','orig_sl','orig_tgt','raw_message']).writeheader()
             print("No new trades found.")
         if max_id > last_id:
             save_state({'last_message_id': max_id})
