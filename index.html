@@ -19,7 +19,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14
 header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:14px}
 .logo{width:30px;height:30px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:500;color:#0d0f12}
 .logo-text{font-size:15px;font-weight:500}
-.logo-sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto}
+.logo-sub{font-size:11px;color:var(--muted);font-family:var(--mono);margin-left:auto;display:flex;align-items:center;gap:10px}
+.conn-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block}
+.conn-dot.ok{background:var(--green)}
+.conn-dot.err{background:var(--red)}
 .layout{display:grid;grid-template-columns:380px 1fr;height:calc(100vh - 53px)}
 .sidebar{border-right:1px solid var(--border);padding:18px;display:flex;flex-direction:column;gap:14px;overflow-y:auto;background:var(--s1)}
 .main{padding:20px 24px;overflow-y:auto}
@@ -97,11 +100,15 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .c-win{color:var(--green)}
 .c-loss{color:var(--red)}
 .c-ambig{color:var(--muted)}
-.btn-close-tr,.btn-edit-tr,.btn-del-tr{padding:3px 7px;background:transparent;border:1px solid var(--border2);border-radius:4px;color:var(--muted);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;margin-right:3px}
+.btn-close-tr,.btn-edit-tr,.btn-del-tr,.btn-recheck-tr{padding:3px 7px;background:transparent;border:1px solid var(--border2);border-radius:4px;color:var(--muted);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;margin-right:3px}
 .btn-close-tr:hover{border-color:var(--amber);color:var(--amber)}
 .btn-edit-tr:hover{border-color:var(--accent2);color:var(--accent2)}
 .btn-del-tr:hover{border-color:var(--red);color:var(--red)}
+.btn-recheck-tr:hover{border-color:var(--accent);color:var(--accent)}
 .auto-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#1c3a2e;color:var(--green);margin-left:4px}
+.tracking-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#1a2e3d;color:var(--accent);margin-left:4px}
+.status-pending{color:var(--muted)}
+.status-open{color:var(--amber)}
 .empty{text-align:center;padding:48px;color:var(--muted);font-family:var(--mono);font-size:12px}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;align-items:center;justify-content:center}
 .modal-overlay.show{display:flex}
@@ -132,7 +139,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 <header>
   <div class="logo">σ</div>
   <span class="logo-text">VolStop</span>
-  <span class="logo-sub">volatility-scaled stops &amp; targets // forward test logger</span>
+  <span class="logo-sub"><span class="conn-dot" id="conn-dot"></span><span id="conn-text">connecting…</span></span>
 </header>
 
 <div class="layout">
@@ -181,7 +188,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
           </table>
         </div>
       </div>
-      <button class="btn-log" onclick="logTrade()">↓ Log this trade</button>
+      <button class="btn-log" id="btn-log-single" onclick="logSingleTrade()">↓ Log this trade</button>
     </div>
   </div>
 
@@ -192,13 +199,8 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <label>PASTE FROM WHATSAPP / TELEGRAM</label>
       <textarea id="paste-input" placeholder="#POSITIONAL&#10;DMART&#10;BUY ABOVE: 4375&#10;SL: 4287 (DAY-CLOSING BASIS)&#10;TGT: 4551&#10;Holding Period: 30 Days&#10;&#10;...paste multiple"></textarea>
     </div>
-    <div class="field"><label>MODE</label>
-      <div class="seg">
-        <button id="p-forward" onclick="setPasteMode('forward')" class="on-mom">Forward Test</button>
-        <button id="p-backtest" onclick="setPasteMode('backtest')">Backtest</button>
-      </div>
-    </div>
     <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
+    <button class="btn-sec" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
     <div id="parsed-list"></div>
     <button class="btn-main" id="btn-log-all" style="display:none" onclick="logAllParsed()">↓ Log all trades</button>
   </div>
@@ -208,14 +210,14 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="tabs">
     <div class="tab active" onclick="swTab('open',this)">Open trades</div>
     <div class="tab" onclick="swTab('closed',this)">Closed trades</div>
-    <div class="tab" onclick="swTab('backtest',this)">Backtest</div>
     <div class="tab" onclick="swTab('analysis',this)">Analysis</div>
   </div>
 
   <div class="tc active" id="tc-open">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('open')">Export CSV</button>
-      <button class="action-btn" onclick="autoCheck()">⟳ Check prices &amp; auto-close</button>
+      <button class="exp-btn" onclick="checkSplits()">⟳ Check splits &amp; adjust</button>
+      <button class="action-btn" onclick="refreshAll()">⟳ Refresh from server</button>
     </div>
     <div class="tbl-wrap">
       <table class="tbl">
@@ -224,7 +226,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
           <th>ORIG SL</th><th>ORIG TGT</th>
           <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
           <th>DV20 k2 SL</th><th>DV20 k2 TGT</th>
-          <th>FV20%</th><th>DV20%</th><th>ACTIONS</th>
+          <th>FV20%</th><th>DV20%</th><th>STATUS</th><th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-open"></tbody>
       </table>
@@ -238,32 +240,12 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="tbl-wrap">
       <table class="tbl">
         <thead><tr>
-          <th>TICKER</th><th>ENTRY</th><th>EXIT</th>
+          <th>TICKER</th><th>ENTRY DATE</th><th>EXIT DATE</th>
           <th>ENTRY ₹</th><th>EXIT ₹</th><th>LOG RET</th>
-          <th>ORIG OUTCOME</th><th>VOL OUTCOME</th>
+          <th>ORIG OUTCOME</th><th>VOL OUTCOME (FV20k2)</th>
           <th>SETUP</th><th>REASON</th><th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-closed"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="tc" id="tc-backtest">
-    <div class="tbl-actions">
-      <button class="exp-btn" onclick="exportCSV('backtest')">Export CSV</button>
-      <button class="exp-btn" onclick="importTGTrades()" style="margin-left:4px;color:var(--accent2);border-color:var(--accent2)">↓ Import TG trades</button>
-      <button class="action-btn" onclick="autoCloseBacktest()">⟳ Auto-close backtest trades</button>
-    </div>
-    <div class="tbl-wrap">
-      <table class="tbl">
-        <thead><tr>
-          <th>TICKER</th><th>DATE</th><th>ENTRY</th><th>SETUP</th>
-          <th>ORIG SL</th><th>ORIG TGT</th>
-          <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
-          <th>EXIT ₹</th><th>LOG RET</th>
-          <th>ORIG OUTCOME</th><th>VOL OUTCOME</th><th>ACTIONS</th>
-        </tr></thead>
-        <tbody id="tb-backtest"></tbody>
       </table>
     </div>
   </div>
@@ -328,8 +310,9 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 
 <script>
 const LBS=[20,60,252], KS=[1.5,2,2.5,3], HORIZON=30;
-let cur=null, closing=null, editing=null, setup='MOMENTUM', pasteMode='forward';
-let parsedTrades=[];
+let setup='MOMENTUM';
+let parsedTrades=[]; // items pending review before "Log all trades" — from paste OR from TG fetch
+let ALL_TRADES=[];   // local cache of what the server returned, refreshed on load and after every mutation
 
 // ── Infrastructure ──
 const WORKER='https://yahoo-proxy.shaswatkashyap25.workers.dev';
@@ -372,17 +355,15 @@ async function yahooFetch(url){
 }
 
 async function fetchPrices(ticker, forDate=null){
-  // Fyers first
   try{
     const sym=toFyersSym(ticker);
     const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
     const start=new Date(end); start.setDate(start.getDate()-420);
-    const j=await fyersFetch(`/api/v3/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${Math.floor(start/1000)}&range_to=${Math.floor(end/1000)}&cont_flag=1`);
+    const j=await fyersFetch(`/data/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${Math.floor(start/1000)}&range_to=${Math.floor(end/1000)}&cont_flag=1`);
     if(j?.s==='ok'&&j?.candles?.length>=20){
       return{sym:ticker.replace(/\.(NS|BO)$/i,'')+'.NS', closes:j.candles.map(c=>c[4])};
     }
   }catch(e){}
-  // Yahoo fallback
   const raw=ticker.replace(/\.(NS|BO)$/i,'');
   const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
   const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
@@ -397,30 +378,6 @@ async function fetchPrices(ticker, forDate=null){
     if(clean.length>=20) return{sym,closes:clean};
   }
   throw new Error('No data for '+ticker);
-}
-
-async function fetchLTP(ticker){
-  try{
-    const j=await fyersFetch(`/api/v3/quotes?symbols=${encodeURIComponent(toFyersSym(ticker))}`);
-    if(j?.s==='ok'&&j?.d?.[0]?.v?.lp) return j.d[0].v.lp;
-  }catch(e){}
-  const raw=ticker.replace(/\.(NS|BO)$/i,'');
-  const sym=raw+(ticker.match(/\.(NS|BO)$/i)?ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS');
-  const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`);
-  return j?.chart?.result?.[0]?.meta?.regularMarketPrice||null;
-}
-
-async function fetchIntraday(ticker, date){
-  // Fetch 1-min candles for a specific date to resolve ambiguous trades
-  try{
-    const sym=toFyersSym(ticker);
-    const d=new Date(date);
-    const p1=Math.floor(d/1000);
-    const p2=p1+86400;
-    const j=await fyersFetch(`/api/v3/history?symbol=${encodeURIComponent(sym)}&resolution=1&date_format=0&range_from=${p1}&range_to=${p2}&cont_flag=1`);
-    if(j?.s==='ok'&&j?.candles?.length>0) return j.candles;
-  }catch(e){}
-  return null;
 }
 
 async function fetchSplitFactor(ticker, entryDate){
@@ -456,55 +413,82 @@ function downVol(lr,lb){
 function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
 function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
 
-// Compute outcomes for all 24 combinations given exit price
-function computeOutcomes(trade, exitPrice){
-  const outcomes={};
-  // Original outcome
-  const origSl=parseFloat(trade.orig_sl), origTgt=parseFloat(trade.orig_tgt);
-  if(origSl&&origTgt){
-    if(exitPrice>=origTgt) outcomes.orig='WIN';
-    else if(exitPrice<=origSl) outcomes.orig='LOSS';
-    else outcomes.orig='MANUAL';
-  }
-  // Vol-based outcomes for all combinations
-  LBS.forEach(lb=>{
-    ['fv','dv'].forEach(vt=>{
-      KS.forEach(k=>{
-        const ks=k.toFixed(1).replace('.','_');
-        const sl=parseFloat(trade[`stop_${vt}_${lb}_k${ks}`]);
-        const tgt=parseFloat(trade[`tgt_${vt}_${lb}_k${ks}`]);
-        if(sl&&tgt){
-          const key=`outcome_${vt}_${lb}_k${ks}`;
-          if(exitPrice>=tgt) outcomes[key]='WIN';
-          else if(exitPrice<=sl) outcomes[key]='LOSS';
-          else outcomes[key]='MANUAL';
-        }
-      });
-    });
-  });
-  return outcomes;
-}
-
 async function computeVol(ticker, entry, setupType, forDate=null){
   const{sym,closes}=await fetchPrices(ticker, forDate);
   const lr=logReturns(closes);
   const d={ticker:sym, entry_price:entry, setup_type:setupType,
     entry_date:forDate||new Date().toISOString().split('T')[0],
-    history_days:lr.length, orig_sl:'', orig_tgt:'',
-    exit_date:'', exit_price:'', exit_reason:'', log_return:'', auto_closed:''};
+    history_days:lr.length,
+    vol_annualized:{}, combos:[]}; // combos: flat list of {vol_type,k,lookback,stop,target} — vol_type is 'full'|'downside', matching the Worker's schema
   LBS.forEach(lb=>{
     const fv=fullVol(lr,lb), dv=downVol(lr,lb);
-    d[`fv_${lb}_ann`]=fv?(fv*100).toFixed(1):null;
-    d[`dv_${lb}_ann`]=dv?(dv*100).toFixed(1):null;
+    d.vol_annualized[`fv_${lb}`]=fv?parseFloat((fv*100).toFixed(1)):null;
+    d.vol_annualized[`dv_${lb}`]=dv?parseFloat((dv*100).toFixed(1)):null;
     KS.forEach(k=>{
-      const ks=k.toFixed(1).replace('.','_');
-      d[`stop_fv_${lb}_k${ks}`]=fv?stopPx(entry,fv,k):null;
-      d[`tgt_fv_${lb}_k${ks}`]=fv?tgtPx(entry,fv,k):null;
-      d[`stop_dv_${lb}_k${ks}`]=dv?stopPx(entry,dv,k):null;
-      d[`tgt_dv_${lb}_k${ks}`]=dv?tgtPx(entry,dv,k):null;
+      d.combos.push({vol_type:'full',k,lookback:lb,stop:fv?stopPx(entry,fv,k):null,target:fv?tgtPx(entry,fv,k):null});
+      d.combos.push({vol_type:'downside',k,lookback:lb,stop:dv?stopPx(entry,dv,k):null,target:dv?tgtPx(entry,dv,k):null});
     });
   });
   return d;
+}
+
+// ── API layer (talks to the Cloudflare Worker, never localStorage) ──
+async function apiGetTrades(){
+  const r=await fetch(WORKER+'/trades');
+  if(!r.ok) throw new Error('Failed to load trades from server');
+  const j=await r.json();
+  return j.trades||[];
+}
+async function apiCreateTrade(body){
+  const r=await fetch(WORKER+'/trades',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(!r.ok) throw new Error(j.error||'Create failed');
+  return j.trade;
+}
+async function apiUpdateTrade(id,patch){
+  const r=await fetch(WORKER+'/trades/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(patch)});
+  const j=await r.json();
+  if(!r.ok) throw new Error(j.error||'Update failed');
+  return j.trade;
+}
+async function apiDeleteTrade(id){
+  const r=await fetch(WORKER+'/trades/'+id,{method:'DELETE'});
+  if(!r.ok) throw new Error('Delete failed');
+}
+async function apiRecheckTrade(id){
+  const r=await fetch(WORKER+'/trades/'+id+'/recheck',{method:'POST'});
+  const j=await r.json();
+  if(!r.ok) throw new Error(j.error||'Recheck failed');
+  return j.trade;
+}
+
+// Turns the flat combos[] from computeVol into the exact 24-entry shape the
+// Worker requires on POST /trades.
+function combosToApiShape(combos){
+  return combos.map(c=>({vol_type:c.vol_type,k:c.k,lookback:c.lookback,stop:c.stop,target:c.target}));
+}
+
+// Finds one specific combo (e.g. "full vol, 20d lookback, k=2") out of a
+// trade's 24-entry vol_combinations array — used everywhere the tables need
+// to show a specific column like "FV20 k2 SL".
+function findCombo(trade,volType,lookback,k){
+  return (trade.vol_combinations||[]).find(c=>c.vol_type===volType&&c.lookback===lookback&&c.k===k);
+}
+
+async function refreshAll(){
+  try{
+    ALL_TRADES=await apiGetTrades();
+    setConn(true);
+  }catch(e){
+    setConn(false);
+    toast('Could not reach server: '+e.message,'err');
+  }
+  renderTrades();
+}
+
+function setConn(ok){
+  document.getElementById('conn-dot').className='conn-dot '+(ok?'ok':'err');
+  document.getElementById('conn-text').textContent=ok?'connected':'offline';
 }
 
 // ── UI ──
@@ -519,11 +503,6 @@ function setSeg(val){
   document.getElementById('b-mom').className=val==='MOMENTUM'?'on-mom':'';
   document.getElementById('b-rev').className=val==='REVERSAL'?'on-rev':'';
 }
-function setPasteMode(m){
-  pasteMode=m;
-  document.getElementById('p-forward').className=m==='forward'?'on-mom':'';
-  document.getElementById('p-backtest').className=m==='backtest'?'on-rev':'';
-}
 function swTab(name,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tc').forEach(t=>t.classList.remove('active'));
@@ -531,6 +510,8 @@ function swTab(name,el){
   document.getElementById('tc-'+name).classList.add('active');
   if(name==='analysis') renderAnalysis();
 }
+
+let cur=null; // last single-trade computeVol() result, pending "Log this trade"
 
 async function compute(){
   const ticker=document.getElementById('inp-ticker').value.trim().toUpperCase();
@@ -562,35 +543,54 @@ function renderResult(d){
     note.classList.add('show');
   }else{note.classList.remove('show');}
   document.getElementById('vol-grid').innerHTML=LBS.map(lb=>{
-    const fv=d[`fv_${lb}_ann`],dv=d[`dv_${lb}_ann`];
-    if(!fv) return`<div class="vc"><div class="vc-lb">${lb}d</div><div class="vc-na">n/a</div></div>`;
+    const fv=d.vol_annualized[`fv_${lb}`],dv=d.vol_annualized[`dv_${lb}`];
+    if(fv==null) return`<div class="vc"><div class="vc-lb">${lb}d</div><div class="vc-na">n/a</div></div>`;
     return`<div class="vc"><div class="vc-lb">${lb}d</div><div class="vc-fv">${fv}%</div><div class="vc-dv">↓${dv??'—'}%</div></div>`;
   }).join('');
   let rows='';
   LBS.forEach(lb=>{
-    rows+=`<tr><td><span class="pill-fv">FV</span>${lb}d</td>${KS.map(k=>{
-      const ks=k.toFixed(1).replace('.','_');
-      if(!d[`fv_${lb}_ann`]) return`<td class="na-val">n/a</td>`;
-      return`<td><span class="fv-val">▼₹${fmt(d[`stop_fv_${lb}_k${ks}`])}</span><br><span class="tgt-val">▲₹${fmt(d[`tgt_fv_${lb}_k${ks}`])}</span></td>`;
-    }).join('')}</tr>`;
-    rows+=`<tr><td><span class="pill-dv">DV</span>${lb}d</td>${KS.map(k=>{
-      const ks=k.toFixed(1).replace('.','_');
-      if(!d[`dv_${lb}_ann`]) return`<td class="na-val">n/a</td>`;
-      return`<td><span class="dv-val">▼₹${fmt(d[`stop_dv_${lb}_k${ks}`])}</span><br><span class="tgt-val">▲₹${fmt(d[`tgt_dv_${lb}_k${ks}`])}</span></td>`;
-    }).join('')}</tr>`;
+    ['full','downside'].forEach(vt=>{
+      rows+=`<tr><td><span class="${vt==='full'?'pill-fv':'pill-dv'}">${vt==='full'?'FV':'DV'}</span>${lb}d</td>${KS.map(k=>{
+        const c=d.combos.find(x=>x.vol_type===vt&&x.lookback===lb&&x.k===k);
+        if(!c||c.stop==null) return`<td class="na-val">n/a</td>`;
+        return`<td><span class="${vt==='full'?'fv-val':'dv-val'}">▼₹${fmt(c.stop)}</span><br><span class="tgt-val">▲₹${fmt(c.target)}</span></td>`;
+      }).join('')}</tr>`;
+    });
   });
   document.getElementById('combo-body').innerHTML=rows;
   document.getElementById('res-box').classList.add('show');
 }
 
-// ── Paste ──
+async function logSingleTrade(){
+  if(!cur) return;
+  const btn=document.getElementById('btn-log-single');
+  btn.disabled=true; btn.innerHTML='<span class="spin"></span>Logging…';
+  try{
+    // Single Trade mode has no pre-existing call, so no orig_sl/orig_tgt is
+    // sent at all — the Worker treats that as "no original outcome to track,
+    // just the 24 vol combinations."
+    await apiCreateTrade({
+      ticker:cur.ticker, setup_type:cur.setup_type, buy_above:cur.entry_price,
+      call_timestamp:new Date().toISOString(),
+      vol_annualized:cur.vol_annualized,
+      vol_combinations:combosToApiShape(cur.combos)
+    });
+    toast('Trade logged ✓','ok');
+    await refreshAll();
+    document.getElementById('res-box').classList.remove('show');
+    cur=null;
+  }catch(e){toast(e.message,'err');}
+  finally{btn.disabled=false; btn.innerHTML='↓ Log this trade';}
+}
+
+// ── Paste & Log ──
 function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
   const blocks=text.split(/#POSITIONAL/i).filter(b=>b.trim());
   parsedTrades=[];
   document.getElementById('parsed-list').innerHTML='';
-  blocks.forEach((block,i)=>{
+  blocks.forEach((block)=>{
     const lines=block.split(/\n/).map(l=>l.trim()).filter(Boolean);
     const dateMatch=text.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
     let entryDate=new Date().toISOString().split('T')[0];
@@ -604,20 +604,64 @@ function parsePaste(){
     const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
     const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
     if(!entry||isNaN(entry)) return;
-    parsedTrades.push({ticker,entry,origSl,origTgt,entryDate,setup:'MOMENTUM'});
-    const el=document.createElement('div');
-    el.className='parsed-item';
-    el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${ticker}</span><span class="parsed-price">₹${entry}</span></div>
-      <div class="parsed-orig">SL <span class="orig-sl">${origSl?'₹'+origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${origTgt?'₹'+origTgt:'—'}</span> &nbsp; ${entryDate}</div>
-      <div class="field"><label>SETUP</label><div class="seg">
-        <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="on-mom">Momentum</button>
-        <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')">Reversal</button>
-      </div></div>`;
-    document.getElementById('parsed-list').appendChild(el);
+    addParsedItem({ticker,entry,origSl,origTgt,entryDate,setup:'MOMENTUM'});
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
   document.getElementById('btn-log-all').style.display='block';
+}
+
+async function fetchTGTrades(){
+  toast('Fetching TG trades…','');
+  try{
+    const url='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv?t='+Date.now();
+    const r=await fetch(url);
+    if(!r.ok) throw new Error('Could not fetch TG trades CSV');
+    const text=await r.text();
+    const lines=text.trim().split('\n');
+    if(lines.length<2){toast('No trades in CSV yet','err');return;}
+    const headers=lines[0].split(',').map(h=>h.trim());
+    const rows=lines.slice(1).map(l=>{
+      const vals=l.split(',');
+      const obj={};
+      headers.forEach((h,i)=>obj[h]=vals[i]?.trim()||'');
+      return obj;
+    });
+    // Dedupe against trades already logged (same ticker + same entry_date)
+    if(!ALL_TRADES.length) ALL_TRADES=await apiGetTrades();
+    const existingKeys=new Set(ALL_TRADES.map(t=>`${t.ticker.replace(/\.(NS|BO)$/i,'')}_${t.entry_date||t.call_timestamp?.slice(0,10)}`));
+    let added=0;
+    for(const row of rows){
+      if(!row.ticker||!row.entry_price) continue;
+      const key=`${row.ticker}_${row.entry_date}`;
+      if(existingKeys.has(key)) continue;
+      addParsedItem({
+        ticker:row.ticker, entry:parseFloat(row.entry_price),
+        origSl:row.orig_sl?parseFloat(row.orig_sl):null,
+        origTgt:row.orig_tgt?parseFloat(row.orig_tgt):null,
+        entryDate:row.entry_date, setup:'MOMENTUM'
+      });
+      added++;
+    }
+    if(!added){toast('No new trades — everything in the CSV is already logged','ok');return;}
+    toast(`${added} new trade${added>1?'s':''} found — review and log below`,'ok');
+    document.getElementById('btn-log-all').style.display='block';
+  }catch(e){toast('Fetch failed: '+e.message,'err');}
+}
+
+function addParsedItem(p){
+  const i=parsedTrades.length;
+  parsedTrades.push(p);
+  const el=document.createElement('div');
+  el.className='parsed-item';
+  el.id=`parsed-${i}`;
+  el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span></div>
+    <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}</div>
+    <div class="field"><label>SETUP</label><div class="seg">
+      <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="on-mom">Momentum</button>
+      <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')">Reversal</button>
+    </div></div>`;
+  document.getElementById('parsed-list').appendChild(el);
 }
 
 function setParsedSetup(i,val){
@@ -630,18 +674,21 @@ async function logAllParsed(){
   if(!parsedTrades.length) return;
   const btn=document.getElementById('btn-log-all');
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>Fetching vol data…';
-  const isBacktest=pasteMode==='backtest';
-  const trades=getTrades();
   let success=0,fail=0;
   for(const p of parsedTrades){
     try{
       const d=await computeVol(p.ticker,p.entry,p.setup,p.entryDate);
-      d.orig_sl=p.origSl||''; d.orig_tgt=p.origTgt||'';
-      d.is_backtest=isBacktest?'1':'';
-      trades.push(d); success++;
+      await apiCreateTrade({
+        ticker:d.ticker, setup_type:d.setup_type, buy_above:p.entry,
+        orig_sl:p.origSl||undefined, orig_tgt:p.origTgt||undefined,
+        call_timestamp:new Date(p.entryDate).toISOString(),
+        vol_annualized:d.vol_annualized,
+        vol_combinations:combosToApiShape(d.combos)
+      });
+      success++;
     }catch(e){fail++;}
   }
-  saveTrades(trades); renderTrades();
+  await refreshAll();
   toast(`${success} logged${fail?', '+fail+' failed':''}`,success>0?'ok':'err');
   btn.disabled=false; btn.innerHTML='↓ Log all trades';
   document.getElementById('parsed-list').innerHTML='';
@@ -650,218 +697,117 @@ async function logAllParsed(){
   parsedTrades=[];
 }
 
-function logTrade(){
-  if(!cur) return;
-  const trades=getTrades(); trades.push({...cur}); saveTrades(trades);
-  toast('Trade logged ✓','ok'); renderTrades();
-}
-
-// ── Auto close (forward) ──
-async function autoCheck(){
-  const trades=getTrades();
-  const open=trades.filter(t=>!t.exit_price&&!t.is_backtest);
-  if(!open.length){toast('No open trades','ok');return;}
-  toast('Checking splits & prices…','');
-  const today=new Date().toISOString().split('T')[0];
-  let closed=0;
-  for(const t of open){
-    // Adjust splits first
-    const factor=await fetchSplitFactor(t.ticker,t.entry_date);
-    if(factor!==1&&t.split_adjusted!==String(factor)){
-      t.entry_price=parseFloat((parseFloat(t.entry_price)/factor).toFixed(2));
-      ['stop_fv','tgt_fv','stop_dv','tgt_dv'].forEach(pre=>{
-        LBS.forEach(lb=>KS.forEach(k=>{
-          const ks=k.toFixed(1).replace('.','_'), key=`${pre}_${lb}_k${ks}`;
-          if(t[key]) t[key]=parseFloat((parseFloat(t[key])/factor).toFixed(2));
-        }));
-      });
-      if(t.orig_sl) t.orig_sl=parseFloat((parseFloat(t.orig_sl)/factor).toFixed(2));
-      if(t.orig_tgt) t.orig_tgt=parseFloat((parseFloat(t.orig_tgt)/factor).toFixed(2));
-      t.split_adjusted=String(factor);
-    }
-    // Check LTP
-    const ltp=await fetchLTP(t.ticker);
-    if(!ltp) continue;
-    const sl=parseFloat(t['stop_fv_20_k2_0']);
-    const tgt=parseFloat(t['tgt_fv_20_k2_0']);
-    let reason=null;
-    if(tgt&&ltp>=tgt) reason='TARGET_HIT';
-    else if(sl&&ltp<=sl) reason='SL_HIT';
-    if(reason){
-      t.exit_price=ltp; t.exit_date=today; t.exit_reason=reason; t.auto_closed='1';
-      t.log_return=Math.log(ltp/parseFloat(t.entry_price)).toFixed(6);
-      const outcomes=computeOutcomes(t,ltp);
-      Object.assign(t,outcomes);
-      closed++;
-    }
-  }
-  saveTrades(trades); renderTrades();
-  toast(closed?`${closed} auto-closed`:'All still open','ok');
-}
-
-// ── Backtest auto-close ──
-async function autoCloseBacktest(){
-  const trades=getTrades();
-  const open=trades.filter(t=>!t.exit_price&&t.is_backtest);
-  if(!open.length){toast('No open backtest trades','ok');return;}
-  toast('Running backtest closure…','');
-  let closed=0, failed=0;
+// ── Manual split/bonus adjustment (button-triggered, not automatic) ──
+async function checkSplits(){
+  const open=ALL_TRADES.filter(t=>t.state!=='CLOSED');
+  if(!open.length){toast('No open trades to check','ok');return;}
+  toast('Checking for splits…','');
+  let adjusted=0;
   for(const t of open){
     try{
-      const raw=t.ticker.replace(/\.(NS|BO)$/i,'');
-      const sfx=t.ticker.match(/\.(NS|BO)$/i)?t.ticker.match(/\.(NS|BO)$/i)[0].toUpperCase():'.NS';
-      const sym=raw+sfx;
-      const p1=Math.floor(new Date(t.entry_date)/1000);
-      const p2=Math.floor(Date.now()/1000);
-      const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
-      if(!j){failed++;continue;}
-      const result=j.chart.result[0];
-      const timestamps=result.timestamp;
-      const highs=result.indicators.quote[0].high;
-      const lows=result.indicators.quote[0].low;
-      const closes=result.indicators.quote[0].close;
-      // Use FV20 k2 as primary vol-based levels
-      const volSl=parseFloat(t['stop_fv_20_k2_0'])||parseFloat(t.orig_sl)||null;
-      const volTgt=parseFloat(t['tgt_fv_20_k2_0'])||parseFloat(t.orig_tgt)||null;
-      if(!volSl&&!volTgt){failed++;continue;}
-      let exitDate=null,exitPrice=null,exitReason=null;
-      for(let i=1;i<timestamps.length;i++){
-        const high=highs[i],low=lows[i],close=closes[i];
-        if(!high||!low||!close) continue;
-        const date=new Date(timestamps[i]*1000).toISOString().split('T')[0];
-        const slHit=volSl&&low<=volSl;
-        const tgtHit=volTgt&&high>=volTgt;
-        if(slHit&&tgtHit){
-          // Ambiguous day — try Fyers intraday to resolve
-          const intraday=await fetchIntraday(t.ticker,date);
-          if(intraday){
-            let resolved=false;
-            for(const candle of intraday){
-              const cHigh=candle[2],cLow=candle[3];
-              if(volTgt&&cHigh>=volTgt){exitDate=date;exitPrice=volTgt;exitReason='TARGET_HIT';resolved=true;break;}
-              if(volSl&&cLow<=volSl){exitDate=date;exitPrice=volSl;exitReason='SL_HIT';resolved=true;break;}
-            }
-            if(!resolved){exitDate=date;exitPrice=close;exitReason='AMBIGUOUS';}
-          }else{
-            exitDate=date;exitPrice=close;exitReason='AMBIGUOUS';
-          }
-          break;
-        }else if(tgtHit){exitDate=date;exitPrice=volTgt;exitReason='TARGET_HIT';break;}
-        else if(slHit){exitDate=date;exitPrice=volSl;exitReason='SL_HIT';break;}
-      }
-      if(exitDate){
-        t.exit_date=exitDate; t.exit_price=exitPrice; t.exit_reason=exitReason;
-        t.log_return=Math.log(exitPrice/parseFloat(t.entry_price)).toFixed(6);
-        const outcomes=computeOutcomes(t,exitPrice);
-        Object.assign(t,outcomes);
-        closed++;
-      }
-    }catch(e){failed++;}
+      const factor=await fetchSplitFactor(t.ticker,t.entry_date||t.call_timestamp.slice(0,10));
+      if(factor===1) continue;
+      const patch={};
+      if(t.buy_above) patch.buy_above=parseFloat((t.buy_above/factor).toFixed(2));
+      if(t.entry_price) patch.entry_price=parseFloat((t.entry_price/factor).toFixed(2));
+      if(t.orig_sl!=null) patch.orig_sl=parseFloat((t.orig_sl/factor).toFixed(2));
+      if(t.orig_tgt!=null) patch.orig_tgt=parseFloat((t.orig_tgt/factor).toFixed(2));
+      patch.vol_combinations=t.vol_combinations.map(c=>({
+        ...c,
+        stop:c.stop!=null?parseFloat((c.stop/factor).toFixed(2)):null,
+        target:c.target!=null?parseFloat((c.target/factor).toFixed(2)):null
+      }));
+      await apiUpdateTrade(t.id,patch);
+      adjusted++;
+    }catch(e){}
   }
-  saveTrades(trades); renderTrades();
-  toast(`${closed} closed${failed?' ('+failed+' failed)':''}`,closed>0?'ok':'err');
+  await refreshAll();
+  toast(adjusted?`${adjusted} trade(s) split-adjusted`:'No splits found','ok');
 }
 
-// ── Storage ──
-function getTrades(){try{return JSON.parse(localStorage.getItem('volstop_v5')||'[]')}catch{return[]}}
-function saveTrades(t){localStorage.setItem('volstop_v5',JSON.stringify(t))}
-
 // ── Render ──
-function outcomeCell(val){
-  if(!val) return '<td>—</td>';
-  if(val==='WIN') return`<td class="outcome-win">WIN</td>`;
-  if(val==='LOSS') return`<td class="outcome-loss">LOSS</td>`;
-  if(val==='AMBIGUOUS') return`<td class="outcome-ambig">AMBIG</td>`;
-  return`<td class="c-ambig">${val}</td>`;
+function outcomeCell(reason){
+  if(!reason) return '<td>—</td>';
+  if(reason==='TARGET_HIT') return`<td class="outcome-win">WIN</td>`;
+  if(reason==='SL_HIT') return`<td class="outcome-loss">LOSS</td>`;
+  if(reason==='AMBIGUOUS') return`<td class="outcome-ambig">AMBIG</td>`;
+  return`<td class="c-ambig">${reason}</td>`;
 }
 
 function renderTrades(){
-  const all=getTrades();
-  const open=all.filter(t=>!t.exit_price&&!t.is_backtest);
-  const closed=all.filter(t=>t.exit_price&&!t.is_backtest);
-  const backtest=all.filter(t=>t.is_backtest);
+  const open=ALL_TRADES.filter(t=>t.state!=='CLOSED');
+  const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
 
   const ot=document.getElementById('tb-open');
-  ot.innerHTML=open.length?open.map(t=>`<tr>
+  ot.innerHTML=open.length?open.map(t=>{
+    const fv20k2=findCombo(t,'full',20,2);
+    const dv20k2=findCombo(t,'downside',20,2);
+    const fvAnn=t.vol_annualized?.fv_20, dvAnn=t.vol_annualized?.dv_20;
+    return`<tr>
     <td class="c-open">${t.ticker}</td>
-    <td>${t.entry_date}</td>
-    <td>₹${fmt(t.entry_price)}</td>
+    <td>${t.entry_date||t.call_timestamp?.slice(0,10)||'—'}</td>
+    <td>₹${fmt(t.entry_price??t.buy_above)}</td>
     <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
-    <td class="orig-sl">${t.orig_sl?'₹'+fmt(t.orig_sl):'—'}</td>
-    <td class="orig-tgt">${t.orig_tgt?'₹'+fmt(t.orig_tgt):'—'}</td>
-    <td class="fv-val">₹${fmt(t['stop_fv_20_k2_0'])}</td>
-    <td class="tgt-val">₹${fmt(t['tgt_fv_20_k2_0'])}</td>
-    <td class="dv-val">₹${fmt(t['stop_dv_20_k2_0'])}</td>
-    <td class="tgt-val">₹${fmt(t['tgt_dv_20_k2_0'])}</td>
-    <td class="fv-val">${t['fv_20_ann']??'—'}%</td>
-    <td class="dv-val">${t['dv_20_ann']??'—'}%</td>
+    <td class="orig-sl">${t.orig_sl!=null?'₹'+fmt(t.orig_sl):'—'}</td>
+    <td class="orig-tgt">${t.orig_tgt!=null?'₹'+fmt(t.orig_tgt):'—'}</td>
+    <td class="fv-val">${fv20k2?'₹'+fmt(fv20k2.stop):'—'}</td>
+    <td class="tgt-val">${fv20k2?'₹'+fmt(fv20k2.target):'—'}</td>
+    <td class="dv-val">${dv20k2?'₹'+fmt(dv20k2.stop):'—'}</td>
+    <td class="tgt-val">${dv20k2?'₹'+fmt(dv20k2.target):'—'}</td>
+    <td class="fv-val">${fvAnn??'—'}%</td>
+    <td class="dv-val">${dvAnn??'—'}%</td>
+    <td class="status-${t.state.toLowerCase()}">${t.state}</td>
     <td>
-      <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
-      <button class="btn-close-tr" onclick="openClose(${all.indexOf(t)})">Close</button>
-      <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
+      <button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>
+      <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
+      <button class="btn-close-tr" onclick="openClose('${t.id}')">Close</button>
+      <button class="btn-del-tr" onclick="delTrade('${t.id}')">Del</button>
     </td>
-  </tr>`).join(''):`<tr><td colspan="13"><div class="empty">No open trades.</div></td></tr>`;
+  </tr>`;
+  }).join(''):`<tr><td colspan="14"><div class="empty">No open trades.</div></td></tr>`;
 
   const ct=document.getElementById('tb-closed');
   ct.innerHTML=closed.length?closed.map(t=>{
-    const lr=parseFloat(t.log_return);
-    const cls=t.log_return?(lr>=0?'c-win':'c-loss'):'';
+    const lr=(t.entry_price&&t.close_price)?Math.log(t.close_price/t.entry_price):null;
+    const cls=lr!=null?(lr>=0?'c-win':'c-loss'):'';
+    const fv20k2=findCombo(t,'full',20,2);
     return`<tr>
-      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}</td>
-      <td>${t.entry_date}</td><td>${t.exit_date||'—'}</td>
-      <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.exit_price)}</td>
-      <td class="${cls}">${t.log_return?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
-      ${outcomeCell(t.orig)}
-      ${outcomeCell(t['outcome_fv_20_k2_0'])}
+      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}</td>
+      <td>${t.entry_date||'—'}</td><td>${t.close_date||'—'}</td>
+      <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.close_price)}</td>
+      <td class="${cls}">${lr!=null?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
+      ${outcomeCell(t.orig_sl!=null?t.close_reason:null)}
+      ${outcomeCell(fv20k2?.close_reason)}
       <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
-      <td style="font-size:10px;color:var(--muted)">${t.exit_reason||'—'}</td>
+      <td style="font-size:10px;color:var(--muted)">${t.close_reason||'—'}</td>
       <td>
-        <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
-        <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
+        <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
+        <button class="btn-del-tr" onclick="delTrade('${t.id}')">Del</button>
       </td>
     </tr>`;
   }).join(''):`<tr><td colspan="11"><div class="empty">No closed trades.</div></td></tr>`;
-
-  const bt=document.getElementById('tb-backtest');
-  bt.innerHTML=backtest.length?backtest.map(t=>{
-    const lr=parseFloat(t.log_return);
-    const cls=t.log_return?(lr>=0?'c-win':'c-loss'):'';
-    return`<tr>
-      <td class="c-open">${t.ticker}</td>
-      <td>${t.entry_date}</td><td>₹${fmt(t.entry_price)}</td>
-      <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
-      <td class="orig-sl">${t.orig_sl?'₹'+fmt(t.orig_sl):'—'}</td>
-      <td class="orig-tgt">${t.orig_tgt?'₹'+fmt(t.orig_tgt):'—'}</td>
-      <td class="fv-val">₹${fmt(t['stop_fv_20_k2_0'])}</td>
-      <td class="tgt-val">₹${fmt(t['tgt_fv_20_k2_0'])}</td>
-      <td>₹${fmt(t.exit_price)}</td>
-      <td class="${cls}">${t.log_return?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
-      ${outcomeCell(t.orig)}
-      ${outcomeCell(t['outcome_fv_20_k2_0'])}
-      <td>
-        <button class="btn-edit-tr" onclick="openEdit(${all.indexOf(t)})">Edit</button>
-        ${!t.exit_price?`<button class="btn-close-tr" onclick="openClose(${all.indexOf(t)})">Close</button>`:''}
-        <button class="btn-del-tr" onclick="delTrade(${all.indexOf(t)})">Del</button>
-      </td>
-    </tr>`;
-  }).join(''):`<tr><td colspan="13"><div class="empty">No backtest trades.</div></td></tr>`;
 }
 
 // ── Analysis ──
 function renderAnalysis(){
-  const all=getTrades().filter(t=>t.exit_price&&t.exit_reason!=='MANUAL'&&t.exit_reason!=='NOT_TRIGGERED');
-  if(!all.length){document.getElementById('analysis-content').innerHTML='<div class="empty">Close some trades to see analysis.</div>';return;}
+  const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
+  if(!closed.length){document.getElementById('analysis-content').innerHTML='<div class="empty">Close some trades to see analysis.</div>';return;}
 
-  // Build combination list
-  const combos=[];
-  combos.push({key:'orig',label:'Original SL/TGT'});
-  LBS.forEach(lb=>['fv','dv'].forEach(vt=>KS.forEach(k=>{
-    const ks=k.toFixed(1).replace('.','_');
-    combos.push({key:`outcome_${vt}_${lb}_k${ks}`,label:`${vt.toUpperCase()} ${lb}d k${k}`});
-  })));
+  function logRet(entry,exit){return (entry&&exit)?Math.log(exit/entry):null;}
 
-  // Compute stats per combination × setup type
-  const setupTypes=['ALL','MOMENTUM','REVERSAL'];
+  // Row 0: original system (only trades that actually have an original SL/TGT)
+  const origRows=closed.filter(t=>t.orig_sl!=null&&t.orig_tgt!=null&&(t.close_reason==='TARGET_HIT'||t.close_reason==='SL_HIT'));
+  function statsFor(rows,retFn,winReason){
+    if(!rows.length) return{wr:'—',avgRet:'—',n:0};
+    const wins=rows.filter(r=>r.reason===winReason).length;
+    const wr=((wins/rows.length)*100).toFixed(1)+'%';
+    const avgRet=(rows.reduce((s,r)=>s+(r.ret||0),0)/rows.length*100).toFixed(2)+'%';
+    return{wr,avgRet,n:rows.length};
+  }
+
+  const combosMeta=[];
+  LBS.forEach(lb=>['full','downside'].forEach(vt=>KS.forEach(k=>combosMeta.push({vt,lb,k}))));
+
   let html=`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
     <th>COMBINATION</th>
     <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
@@ -869,55 +815,66 @@ function renderAnalysis(){
     <th>REV — WIN%</th><th>REV — AVG RET</th>
   </tr></thead><tbody>`;
 
-  combos.forEach(c=>{
-    const rows=all.filter(t=>t[c.key]);
-    const mom=rows.filter(t=>t.setup_type==='MOMENTUM');
-    const rev=rows.filter(t=>t.setup_type==='REVERSAL');
-
-    function stats(arr){
-      if(!arr.length) return{wr:'—',avgRet:'—',n:0};
-      const wins=arr.filter(t=>t[c.key]==='WIN').length;
-      const wr=((wins/arr.length)*100).toFixed(1)+'%';
-      const avgRet=(arr.reduce((s,t)=>s+parseFloat(t.log_return||0),0)/arr.length*100).toFixed(2)+'%';
-      return{wr,avgRet,n:arr.length};
-    }
-
-    const a=stats(rows),m=stats(mom),r=stats(rev);
-    const isOrig=c.key==='orig';
-    html+=`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">
-      <td style="font-family:var(--mono);font-size:11px">${c.label}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(a.wr)>=50?'var(--green)':'var(--red)'}">${a.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(a.avgRet)>=0?'var(--green)':'var(--red)'}">${a.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${a.n}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(m.wr)>=50?'var(--green)':'var(--red)'}">${m.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(m.avgRet)>=0?'var(--green)':'var(--red)'}">${m.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(r.wr)>=50?'var(--green)':'var(--red)'}">${r.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${parseFloat(r.avgRet)>=0?'var(--green)':'var(--red)'}">${r.avgRet}</td>
+  function buildRow(label,rows,isOrig){
+    const all=statsFor(rows,null,'WIN'), mom=statsFor(rows.filter(r=>r.setup==='MOMENTUM'),null,'WIN'), rev=statsFor(rows.filter(r=>r.setup==='REVERSAL'),null,'WIN');
+    const color=(v)=>v==='—'?'var(--muted)':(parseFloat(v)>=50?'var(--green)':'var(--red)');
+    const colorRet=(v)=>v==='—'?'var(--muted)':(parseFloat(v)>=0?'var(--green)':'var(--red)');
+    return `<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">
+      <td style="font-family:var(--mono);font-size:11px">${label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${color(all.wr)}">${all.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${color(mom.wr)}">${mom.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(mom.avgRet)}">${mom.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${color(rev.wr)}">${rev.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(rev.avgRet)}">${rev.avgRet}</td>
     </tr>`;
+  }
+
+  const origMapped=origRows.map(t=>({ret:logRet(t.entry_price,t.close_price),reason:t.close_reason==='TARGET_HIT'?'WIN':'LOSS',setup:t.setup_type}));
+  html+=buildRow('Original SL/TGT',origMapped,true);
+
+  combosMeta.forEach(({vt,lb,k})=>{
+    const rows=[];
+    closed.forEach(t=>{
+      const c=findCombo(t,vt,lb,k);
+      if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')){
+        rows.push({ret:c.log_return,reason:c.close_reason==='TARGET_HIT'?'WIN':'LOSS',setup:t.setup_type});
+      }
+    });
+    const label=`${vt==='full'?'FV':'DV'} ${lb}d k${k}`;
+    html+=buildRow(label,rows,false);
   });
+
   html+='</tbody></table></div>';
   document.getElementById('analysis-content').innerHTML=html;
 }
 
 function exportAnalysis(){
-  const all=getTrades().filter(t=>t.exit_price&&t.exit_reason!=='MANUAL'&&t.exit_reason!=='NOT_TRIGGERED');
-  if(!all.length){toast('No closed trades to analyse','err');return;}
-  const combos=[];
-  combos.push({key:'orig',label:'Original SL/TGT'});
-  LBS.forEach(lb=>['fv','dv'].forEach(vt=>KS.forEach(k=>{
-    const ks=k.toFixed(1).replace('.','_');
-    combos.push({key:`outcome_${vt}_${lb}_k${ks}`,label:`${vt.toUpperCase()} ${lb}d k${k}`});
-  })));
+  const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
+  if(!closed.length){toast('No closed trades to analyse','err');return;}
+  const combosMeta=[{vt:null,lb:null,k:null,label:'Original SL/TGT',isOrig:true}];
+  LBS.forEach(lb=>['full','downside'].forEach(vt=>KS.forEach(k=>combosMeta.push({vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,isOrig:false}))));
   const headers=['Combination','Setup','N','Wins','Win%','Avg Log Return%'];
   const rows=[headers.join(',')];
   ['ALL','MOMENTUM','REVERSAL'].forEach(st=>{
-    combos.forEach(c=>{
-      const arr=all.filter(t=>t[c.key]&&(st==='ALL'||t.setup_type===st));
+    combosMeta.forEach(m=>{
+      let arr=[];
+      if(m.isOrig){
+        arr=closed.filter(t=>t.orig_sl!=null&&t.orig_tgt!=null&&(t.close_reason==='TARGET_HIT'||t.close_reason==='SL_HIT')&&(st==='ALL'||t.setup_type===st))
+          .map(t=>({win:t.close_reason==='TARGET_HIT',ret:Math.log(t.close_price/t.entry_price)}));
+      }else{
+        closed.forEach(t=>{
+          if(st!=='ALL'&&t.setup_type!==st) return;
+          const c=findCombo(t,m.vt,m.lb,m.k);
+          if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')) arr.push({win:c.close_reason==='TARGET_HIT',ret:c.log_return});
+        });
+      }
       if(!arr.length) return;
-      const wins=arr.filter(t=>t[c.key]==='WIN').length;
+      const wins=arr.filter(a=>a.win).length;
       const wr=((wins/arr.length)*100).toFixed(1);
-      const avgRet=(arr.reduce((s,t)=>s+parseFloat(t.log_return||0),0)/arr.length*100).toFixed(2);
-      rows.push([c.label,st,arr.length,wins,wr,avgRet].join(','));
+      const avgRet=(arr.reduce((s,a)=>s+(a.ret||0),0)/arr.length*100).toFixed(2);
+      rows.push([m.label,st,arr.length,wins,wr,avgRet].join(','));
     });
   });
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});
@@ -926,115 +883,93 @@ function exportAnalysis(){
 }
 
 // ── Modals ──
-function openClose(idx){
-  closing=idx;
-  const t=getTrades()[idx];
+let closingId=null, editingId=null;
+function openClose(id){
+  closingId=id;
+  const t=ALL_TRADES.find(x=>x.id===id);
   document.getElementById('modal-close-title').textContent='Close — '+t.ticker;
   document.getElementById('m-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('m-price').value='';
   document.getElementById('modal-close').classList.add('show');
 }
-function confirmClose(){
-  if(closing===null) return;
+async function confirmClose(){
+  if(!closingId) return;
   const ep=parseFloat(document.getElementById('m-price').value);
   const ed=document.getElementById('m-date').value;
   const er=document.getElementById('m-reason').value;
   if(!ep||!ed){toast('Fill all fields','err');return;}
-  const trades=getTrades(); const t=trades[closing];
-  t.exit_price=ep; t.exit_date=ed; t.exit_reason=er; t.auto_closed='';
-  t.log_return=Math.log(ep/parseFloat(t.entry_price)).toFixed(6);
-  const outcomes=computeOutcomes(t,ep);
-  Object.assign(t,outcomes);
-  saveTrades(trades); closeModal('modal-close'); renderTrades();
-  toast('Trade closed ✓','ok');
+  try{
+    await apiUpdateTrade(closingId,{state:'CLOSED',close_price:ep,close_date:ed,close_reason:er,auto_closed:false});
+    closeModal('modal-close'); await refreshAll();
+    toast('Trade closed ✓','ok');
+  }catch(e){toast(e.message,'err');}
 }
-function openEdit(idx){
-  editing=idx;
-  const t=getTrades()[idx];
+function openEdit(id){
+  editingId=id;
+  const t=ALL_TRADES.find(x=>x.id===id);
   document.getElementById('e-ticker').value=t.ticker;
-  document.getElementById('e-price').value=t.entry_price;
-  document.getElementById('e-date').value=t.entry_date;
+  document.getElementById('e-price').value=t.entry_price??t.buy_above;
+  document.getElementById('e-date').value=t.entry_date||t.call_timestamp?.slice(0,10)||'';
   document.getElementById('e-setup').value=t.setup_type;
   document.getElementById('modal-edit').classList.add('show');
 }
-function confirmEdit(){
-  if(editing===null) return;
-  const trades=getTrades(); const t=trades[editing];
-  t.ticker=document.getElementById('e-ticker').value.trim().toUpperCase();
-  t.entry_price=parseFloat(document.getElementById('e-price').value);
-  t.entry_date=document.getElementById('e-date').value;
-  t.setup_type=document.getElementById('e-setup').value;
-  saveTrades(trades); closeModal('modal-edit'); renderTrades();
-  toast('Trade updated ✓','ok');
+async function confirmEdit(){
+  if(!editingId) return;
+  try{
+    await apiUpdateTrade(editingId,{
+      ticker:document.getElementById('e-ticker').value.trim().toUpperCase(),
+      entry_price:parseFloat(document.getElementById('e-price').value),
+      entry_date:document.getElementById('e-date').value,
+      setup_type:document.getElementById('e-setup').value
+    });
+    closeModal('modal-edit'); await refreshAll();
+    toast('Trade updated ✓','ok');
+  }catch(e){toast(e.message,'err');}
 }
-function delTrade(idx){
-  const t=getTrades()[idx];
-  if(!confirm(`Delete ${t.ticker} (${t.entry_date})?`)) return;
-  const trades=getTrades(); trades.splice(idx,1); saveTrades(trades); renderTrades();
-  toast('Deleted','ok');
+async function delTrade(id){
+  const t=ALL_TRADES.find(x=>x.id===id);
+  if(!confirm(`Delete ${t.ticker} (${t.entry_date||t.call_timestamp?.slice(0,10)})?`)) return;
+  try{
+    await apiDeleteTrade(id); await refreshAll();
+    toast('Deleted','ok');
+  }catch(e){toast(e.message,'err');}
+}
+async function manualRecheck(id){
+  toast('Rechecking against latest prices…','');
+  try{
+    await apiRecheckTrade(id); await refreshAll();
+    toast('Recheck complete','ok');
+  }catch(e){toast(e.message,'err');}
 }
 function closeModal(id){
   document.getElementById(id).classList.remove('show');
-  closing=null; editing=null;
+  closingId=null; editingId=null;
 }
 
 // ── Export ──
-const TG_TRADES_URL='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv';
-
-async function importTGTrades(){
-  toast('Fetching TG trades…','');
-  try{
-    const r=await fetch(TG_TRADES_URL+'?t='+Date.now());
-    if(!r.ok) throw new Error('Could not fetch TG trades CSV');
-    const text=await r.text();
-    const lines=text.trim().split('\n');
-    if(lines.length<2){toast('No trades in CSV','err');return;}
-    const headers=lines[0].split(',');
-    const rows=lines.slice(1).map(l=>{
-      const vals=l.split(',');
-      const obj={};
-      headers.forEach((h,i)=>obj[h.trim()]=vals[i]?.trim()||'');
-      return obj;
-    });
-    // Show modal to confirm import
-    const msg=`Found ${rows.length} trades from TG channel.\nDate range: ${rows[0]?.entry_date} → ${rows[rows.length-1]?.entry_date}\n\nImport all as backtest trades? Vol data will be fetched when you run auto-close.`;
-    if(!confirm(msg)) return;
-    // Build trade objects — vol data fetched later on auto-close
-    const trades=getTrades();
-    let added=0;
-    for(const row of rows){
-      if(!row.ticker||!row.entry_price) continue;
-      // Skip if already exists
-      const exists=trades.some(t=>t.ticker===row.ticker+'.NS'&&t.entry_date===row.entry_date&&t.is_backtest==='1');
-      if(exists) continue;
-      trades.push({
-        ticker: row.ticker+'.NS',
-        entry_date: row.entry_date,
-        entry_price: parseFloat(row.entry_price),
-        setup_type: 'MOMENTUM', // default, can edit
-        orig_sl: row.orig_sl||'',
-        orig_tgt: row.orig_tgt||'',
-        is_backtest: '1',
-        history_days: '',
-        exit_date:'', exit_price:'', exit_reason:'', log_return:'', auto_closed:''
-      });
-      added++;
-    }
-    saveTrades(trades); renderTrades();
-    toast(`${added} trades imported (${rows.length-added} duplicates skipped)`,'ok');
-  }catch(e){toast('Import failed: '+e.message,'err');}
-}
-
 function exportCSV(type){
-  const all=getTrades();
   let trades;
-  if(type==='open') trades=all.filter(t=>!t.exit_price&&!t.is_backtest);
-  else if(type==='closed') trades=all.filter(t=>t.exit_price&&!t.is_backtest);
-  else if(type==='backtest') trades=all.filter(t=>t.is_backtest);
-  else trades=all;
+  if(type==='open') trades=ALL_TRADES.filter(t=>t.state!=='CLOSED');
+  else if(type==='closed') trades=ALL_TRADES.filter(t=>t.state==='CLOSED');
+  else trades=ALL_TRADES;
   if(!trades.length){toast('Nothing to export','err');return;}
-  const keys=Object.keys(trades[0]);
-  const rows=[keys.join(','),...trades.map(t=>keys.map(k=>String(t[k]??'')).join(','))];
+  // Flatten vol_combinations into columns so the CSV stays portable.
+  const flat=trades.map(t=>{
+    const row={
+      id:t.id, ticker:t.ticker, setup_type:t.setup_type, buy_above:t.buy_above,
+      orig_sl:t.orig_sl, orig_tgt:t.orig_tgt, call_timestamp:t.call_timestamp,
+      entry_date:t.entry_date, entry_price:t.entry_price, state:t.state,
+      close_reason:t.close_reason, close_date:t.close_date, close_price:t.close_price,
+      auto_closed:t.auto_closed, vol_monitoring_active:t.vol_monitoring_active
+    };
+    (t.vol_combinations||[]).forEach(c=>{
+      const pre=`${c.vol_type==='full'?'fv':'dv'}_${c.lookback}_k${String(c.k).replace('.','_')}`;
+      row[`${pre}_stop`]=c.stop; row[`${pre}_target`]=c.target; row[`${pre}_state`]=c.state; row[`${pre}_reason`]=c.close_reason;
+    });
+    return row;
+  });
+  const keys=Object.keys(flat[0]);
+  const rows=[keys.join(','),...flat.map(r=>keys.map(k=>String(r[k]??'')).join(','))];
   const blob=new Blob([rows.join('\n')],{type:'text/csv'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`volstop_${type}_${new Date().toISOString().split('T')[0]}.csv`; a.click();
@@ -1046,7 +981,8 @@ function toast(msg,type=''){
   setTimeout(()=>el.className='toast',3000);
 }
 
-setSeg('MOMENTUM'); renderTrades();
+setSeg('MOMENTUM');
+refreshAll();
 </script>
 </body>
 </html>
