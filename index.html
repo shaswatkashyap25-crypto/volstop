@@ -315,7 +315,7 @@ let parsedTrades=[]; // items pending review before "Log all trades" — from pa
 let ALL_TRADES=[];   // local cache of what the server returned, refreshed on load and after every mutation
 
 // ── Infrastructure ──
-const WORKER='https://url.uk.m.mimecastprotect.com/s/XSBfCB8yDtylvzEXhPSNf2cfVW?domain=yahoo-proxy.shaswatkashyap25.workers.dev';
+const WORKER='https://yahoo-proxy.shaswatkashyap25.workers.dev';
 let FYERS_TOKEN=null;
 
 async function getFyersToken(){
@@ -371,7 +371,7 @@ async function fetchPrices(ticker, forDate=null){
   const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
   for(const sfx of trySfx){
     const sym=raw+sfx;
-    const j=await yahooFetch(`https://url.uk.m.mimecastprotect.com/s/jkxyCDYAGSyOXDgLhLTRfjBtd7?domain=query1.finance.yahoo.com`);
+    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
     if(!j) continue;
     const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
     const clean=closes?closes.filter(Boolean):[];
@@ -387,7 +387,7 @@ async function fetchSplitFactor(ticker, entryDate){
   const p1=Math.floor(new Date(entryDate)/1000);
   const p2=Math.floor(Date.now()/1000);
   try{
-    const j=await yahooFetch(`https://url.uk.m.mimecastprotect.com/s/LCZBCEZBJUY6BkR8FLUyf7nD-e?domain=query1.finance.yahoo.com`);
+    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
     const splits=j?.chart?.result?.[0]?.events?.splits;
     if(!splits) return 1;
     let factor=1;
@@ -523,7 +523,7 @@ async function compute(){
     const d=await computeVol(ticker,entry,setup);
     cur=d; renderResult(d);
   }catch(e){toast(e.message,'err');}
-  finally{btn.disabled=false; btn.innerHTML='Compute stops & targets';}
+  finally{btn.disabled=false; btn.innerHTML='Compute stops &amp; targets';}
 }
 
 function fmt(v,dec=2){
@@ -624,7 +624,7 @@ function parsePaste(){
 async function fetchTGTrades(){
   toast('Fetching TG trades…','');
   try{
-    const url='https://url.uk.m.mimecastprotect.com/s/_AnVCGYELS6Lw2jNTLcPfBLWig?domain=raw.githubusercontent.com'+Date.now();
+    const url='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv?t='+Date.now();
     const r=await fetch(url);
     if(!r.ok) throw new Error('Could not fetch TG trades CSV');
     const text=await r.text();
