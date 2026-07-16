@@ -309,13 +309,13 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 <div class="toast" id="toast"></div>
 
 <script>
-const LBS=[20,60,252], KS=[1.5,2,2.5,3], HORIZON=30;
+const LBS=[20,60,252], KS=[1,1.5,2,2.5,3,4,5];
 let setup='MOMENTUM';
 let parsedTrades=[]; // items pending review before "Log all trades" — from paste OR from TG fetch
 let ALL_TRADES=[];   // local cache of what the server returned, refreshed on load and after every mutation
 
 // ── Infrastructure ──
-const WORKER='https://yahoo-proxy.shaswatkashyap25.workers.dev';
+const WORKER='https://url.uk.m.mimecastprotect.com/s/XSBfCB8yDtylvzEXhPSNf2cfVW?domain=yahoo-proxy.shaswatkashyap25.workers.dev';
 let FYERS_TOKEN=null;
 
 async function getFyersToken(){
@@ -371,7 +371,7 @@ async function fetchPrices(ticker, forDate=null){
   const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
   for(const sfx of trySfx){
     const sym=raw+sfx;
-    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
+    const j=await yahooFetch(`https://url.uk.m.mimecastprotect.com/s/jkxyCDYAGSyOXDgLhLTRfjBtd7?domain=query1.finance.yahoo.com`);
     if(!j) continue;
     const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
     const clean=closes?closes.filter(Boolean):[];
@@ -387,7 +387,7 @@ async function fetchSplitFactor(ticker, entryDate){
   const p1=Math.floor(new Date(entryDate)/1000);
   const p2=Math.floor(Date.now()/1000);
   try{
-    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
+    const j=await yahooFetch(`https://url.uk.m.mimecastprotect.com/s/LCZBCEZBJUY6BkR8FLUyf7nD-e?domain=query1.finance.yahoo.com`);
     const splits=j?.chart?.result?.[0]?.events?.splits;
     if(!splits) return 1;
     let factor=1;
@@ -410,8 +410,8 @@ function downVol(lr,lb){
   const mean=s.reduce((a,b)=>a+b,0)/s.length;
   return Math.sqrt(s.reduce((a,b)=>a+(b-mean)**2,0)/(s.length-1))*Math.sqrt(2)*Math.sqrt(252);
 }
-function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
-function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252))*Math.sqrt(HORIZON))).toFixed(2));}
+function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(252)))).toFixed(2));}
+function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252)))).toFixed(2));}
 
 async function computeVol(ticker, entry, setupType, forDate=null){
   const{sym,closes}=await fetchPrices(ticker, forDate);
@@ -462,14 +462,14 @@ async function apiRecheckTrade(id){
   return j.trade;
 }
 
-// Turns the flat combos[] from computeVol into the exact 24-entry shape the
+// Turns the flat combos[] from computeVol into the exact 42-entry shape the
 // Worker requires on POST /trades.
 function combosToApiShape(combos){
   return combos.map(c=>({vol_type:c.vol_type,k:c.k,lookback:c.lookback,stop:c.stop,target:c.target}));
 }
 
 // Finds one specific combo (e.g. "full vol, 20d lookback, k=2") out of a
-// trade's 24-entry vol_combinations array — used everywhere the tables need
+// trade's 42-entry vol_combinations array — used everywhere the tables need
 // to show a specific column like "FV20 k2 SL".
 function findCombo(trade,volType,lookback,k){
   return (trade.vol_combinations||[]).find(c=>c.vol_type===volType&&c.lookback===lookback&&c.k===k);
@@ -523,7 +523,7 @@ async function compute(){
     const d=await computeVol(ticker,entry,setup);
     cur=d; renderResult(d);
   }catch(e){toast(e.message,'err');}
-  finally{btn.disabled=false; btn.innerHTML='Compute stops &amp; targets';}
+  finally{btn.disabled=false; btn.innerHTML='Compute stops & targets';}
 }
 
 function fmt(v,dec=2){
@@ -568,7 +568,7 @@ async function logSingleTrade(){
   try{
     // Single Trade mode has no pre-existing call, so no orig_sl/orig_tgt is
     // sent at all — the Worker treats that as "no original outcome to track,
-    // just the 24 vol combinations."
+    // just the 42 vol combinations."
     await apiCreateTrade({
       ticker:cur.ticker, setup_type:cur.setup_type, buy_above:cur.entry_price,
       call_timestamp:new Date().toISOString(),
@@ -624,7 +624,7 @@ function parsePaste(){
 async function fetchTGTrades(){
   toast('Fetching TG trades…','');
   try{
-    const url='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv?t='+Date.now();
+    const url='https://url.uk.m.mimecastprotect.com/s/_AnVCGYELS6Lw2jNTLcPfBLWig?domain=raw.githubusercontent.com'+Date.now();
     const r=await fetch(url);
     if(!r.ok) throw new Error('Could not fetch TG trades CSV');
     const text=await r.text();
@@ -997,3 +997,4 @@ refreshAll();
 </script>
 </body>
 </html>
+
