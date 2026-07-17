@@ -133,6 +133,13 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .outcome-win{color:var(--green);font-weight:500}
 .outcome-loss{color:var(--red);font-weight:500}
 .outcome-ambig{color:var(--amber)}
+.subtabs{display:flex;gap:6px;margin-bottom:14px}
+.subtab{padding:6px 13px;font-size:11px;font-family:var(--mono);border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
+.subtab.active{background:#1a2e3d;border-color:var(--accent);color:var(--accent)}
+.grid-title{font-size:11px;font-family:var(--mono);color:var(--muted);letter-spacing:.6px;text-transform:uppercase;margin:18px 0 8px}
+.grid-title:first-child{margin-top:0}
+.days-val{color:var(--accent2)}
+.placeholder-note{font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--s2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-top:16px}
 </style>
 </head>
 <body>
@@ -183,7 +190,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
         <div class="sec-label" style="margin-bottom:5px">Stops &amp; targets — all k × lookback &nbsp;<span class="pill-fv">FV</span> <span class="pill-dv">DV</span></div>
         <div style="overflow-x:auto">
           <table class="combo-tbl">
-            <thead><tr><th>Vol/k→</th><th>1.5×</th><th>2.0×</th><th>2.5×</th><th>3.0×</th></tr></thead>
+            <thead><tr><th>Vol/k→</th><th>1×</th><th>1.5×</th><th>2×</th><th>2.5×</th><th>3×</th><th>4×</th><th>5×</th></tr></thead>
             <tbody id="combo-body"></tbody>
           </table>
         </div>
@@ -290,7 +297,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <h3>Edit trade</h3>
     <div class="modal-form">
       <div class="field"><label>TICKER</label><input id="e-ticker" type="text"/></div>
-      <div class="field"><label>ENTRY PRICE (₹)</label><input id="e-price" type="number" step="0.05"/></div>
+      <div class="field"><label>BUY ABOVE / ENTRY (₹)</label><input id="e-price" type="number" step="0.05"/></div>
       <div class="field"><label>ENTRY DATE</label><input id="e-date" type="date"/></div>
       <div class="field"><label>SETUP TYPE</label>
         <select id="e-setup">
@@ -584,37 +591,80 @@ async function logSingleTrade(){
 }
 
 // ── Paste & Log ──
+// WhatsApp/Telegram export header, e.g. "[01/07/26, 9:09:57 AM] Sender: ...".
+// Seconds are optional since native WhatsApp exports usually omit them.
+const WA_HEADER_RE=/\[(\d{2})\/(\d{2})\/(\d{2}),\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)\]/i;
+
+// Converts a parsed IST wall-clock timestamp (from a WhatsApp/Telegram
+// export) into the correct UTC ISO string. India Standard Time is a fixed
+// UTC+5:30 offset with no daylight saving, so this is a straight subtraction.
+function parseIstTimestamp(dd,mm,yy,hh,min,ss,ampm){
+  let hour=parseInt(hh,10);
+  const isPM=/PM/i.test(ampm);
+  if(isPM&&hour!==12) hour+=12;
+  if(!isPM&&hour===12) hour=0;
+  const year=2000+parseInt(yy,10);
+  const utcMs=Date.UTC(year,parseInt(mm,10)-1,parseInt(dd,10),hour,parseInt(min,10),parseInt(ss||'0',10))-(5.5*60*60*1000);
+  return new Date(utcMs).toISOString();
+}
+
 function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
-  // Split on any of the three tags, keeping the tag attached to the start of
-  // its block — a block can be introduced by #POSITIONAL, #REVERSAL, or
-  // #MOMENTUM (or more than one together on nearby lines).
-  const blocks=text.split(/(?=#(?:POSITIONAL|REVERSAL|MOMENTUM))/i).filter(b=>b.trim());
+
+  // If the paste has WhatsApp/Telegram export headers, split on THAT
+  // boundary instead of on the trade tag. Splitting on the tag alone leaves
+  // each message's own timestamp trailing in the PREVIOUS block (since the
+  // header always precedes the tag), which silently attributes every
+  // message's date/time to the NEXT message instead of its own — otherwise
+  // invisible when messages share a date, but wrong in general and
+  // especially once real times are involved.
+  const hasWaHeaders=WA_HEADER_RE.test(text);
+  const blocks=hasWaHeaders
+    ? text.split(/(?=\[\d{2}\/\d{2}\/\d{2},\s*\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M\])/i).filter(b=>b.trim())
+    : text.split(/(?=#(?:POSITIONAL|REVERSAL|MOMENTUM))/i).filter(b=>b.trim());
+
   parsedTrades=[];
   document.getElementById('parsed-list').innerHTML='';
   blocks.forEach((block)=>{
-    if(!/#(POSITIONAL|REVERSAL|MOMENTUM)/i.test(block)) return; // stray text before the first tag
-    const lines=block.split(/\n/).map(l=>l.trim()).filter(Boolean);
-    const dateMatch=block.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
+    const tagMatch=block.match(/#(POSITIONAL|REVERSAL|MOMENTUM)/i);
+    if(!tagMatch) return; // stray text / non-trade chat lines
+
     let entryDate=new Date().toISOString().split('T')[0];
-    if(dateMatch) entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+    let callTimestamp=null; // exact timestamp when available; null falls back to entryDate at log time
+
+    const waMatch=block.match(WA_HEADER_RE);
+    if(waMatch){
+      const[,dd,mm,yy,hh,min,ss,ampm]=waMatch;
+      callTimestamp=parseIstTimestamp(dd,mm,yy,hh,min,ss,ampm);
+      entryDate=callTimestamp.slice(0,10);
+    }else{
+      const dateMatch=block.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
+      if(dateMatch) entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+    }
+
     // setup type: #REVERSAL or #MOMENTUM if present anywhere in the block;
     // if only #POSITIONAL, leave blank rather than guess.
     let setupType=null;
     if(/#REVERSAL/i.test(block)) setupType='REVERSAL';
     else if(/#MOMENTUM/i.test(block)) setupType='MOMENTUM';
-    const ticker=lines[0]?.replace(/#(POSITIONAL|REVERSAL|MOMENTUM)/gi,'').replace(/[^A-Z0-9&]/gi,'').toUpperCase()
-      ||lines[1]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
-    const buyLine=lines.find(l=>/BUY ABOVE/i.test(l));
-    const slLine=lines.find(l=>/^SL:/i.test(l));
-    const tgtLine=lines.find(l=>/^TGT:/i.test(l));
+
+    // Ticker = first non-empty line AFTER the tag, regardless of whether the
+    // tag sits on its own line or trails a sender/timestamp line — fixes the
+    // previous lines[0]/lines[1] guess, which broke whenever real export
+    // headers were present.
+    const afterTag=block.slice(tagMatch.index+tagMatch[0].length);
+    const bodyLines=afterTag.split(/\n/).map(l=>l.trim()).filter(Boolean);
+    const ticker=bodyLines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
+    const buyLine=bodyLines.find(l=>/BUY ABOVE/i.test(l));
+    const slLine=bodyLines.find(l=>/^SL:/i.test(l));
+    const tgtLine=bodyLines.find(l=>/^TGT:/i.test(l));
     if(!ticker||!buyLine) return;
     const entry=parseFloat(buyLine.replace(/[^0-9.]/g,''));
     const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
     const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
     if(!entry||isNaN(entry)) return;
-    addParsedItem({ticker,entry,origSl,origTgt,entryDate,setup:setupType});
+    addParsedItem({ticker,entry,origSl,origTgt,entryDate,callTimestamp,setup:setupType});
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
@@ -666,7 +716,7 @@ function addParsedItem(p){
   el.className='parsed-item';
   el.id=`parsed-${i}`;
   el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span></div>
-    <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}</div>
+    <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}${p.callTimestamp?' '+new Date(p.callTimestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Kolkata'})+' IST':''}</div>
     ${!p.setup?'<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px">No setup tag found — pick one below</div>':''}
     <div class="field"><label>SETUP</label><div class="seg">
       <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
@@ -692,7 +742,7 @@ async function logAllParsed(){
       await apiCreateTrade({
         ticker:d.ticker, setup_type:d.setup_type, buy_above:p.entry,
         orig_sl:p.origSl||undefined, orig_tgt:p.origTgt||undefined,
-        call_timestamp:new Date(p.entryDate).toISOString(),
+        call_timestamp:p.callTimestamp||new Date(p.entryDate).toISOString(),
         vol_annualized:d.vol_annualized,
         vol_combinations:combosToApiShape(d.combos)
       });
@@ -800,95 +850,216 @@ function renderTrades(){
 }
 
 // ── Analysis ──
-function renderAnalysis(){
+// daysBetween: calendar days from entry_date to close_date for a given
+// row — used for the AVG DAYS (WIN)/(LOSS) columns.
+function daysBetween(d1,d2){
+  if(!d1||!d2) return null;
+  const ms=new Date(d2)-new Date(d1);
+  if(isNaN(ms)) return null;
+  return Math.round(ms/86400000);
+}
+
+function avgDaysFmt(rows,reason){
+  const withDays=rows.filter(r=>r.reason===reason&&r.days!=null);
+  if(!withDays.length) return '—';
+  return (withDays.reduce((s,r)=>s+r.days,0)/withDays.length).toFixed(1);
+}
+
+let analysisView='combos'; // 'combos' | 'marginal' | 'interaction'
+
+// Builds the full row-list once per render: one entry per combination
+// (Original SL/TGT + all 42 vol combos), each carrying its own list of
+// closed-and-resolved {ret,reason,setup,days} rows.
+function buildAnalysisData(){
   const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
-  if(!closed.length){document.getElementById('analysis-content').innerHTML='<div class="empty">Close some trades to see analysis.</div>';return;}
 
   function logRet(entry,exit){return (entry&&exit)?Math.log(exit/entry):null;}
 
-  // Row 0: original system (only trades that actually have an original SL/TGT)
-  const origRows=closed.filter(t=>t.orig_sl!=null&&t.orig_tgt!=null&&(t.close_reason==='TARGET_HIT'||t.close_reason==='SL_HIT'));
-  function statsFor(rows,retFn,winReason){
-    if(!rows.length) return{wr:'—',avgRet:'—',n:0};
-    const wins=rows.filter(r=>r.reason===winReason).length;
-    const wr=((wins/rows.length)*100).toFixed(1)+'%';
-    const avgRet=(rows.reduce((s,r)=>s+(r.ret||0),0)/rows.length*100).toFixed(2)+'%';
-    return{wr,avgRet,n:rows.length};
-  }
+  const origRows=closed
+    .filter(t=>t.orig_sl!=null&&t.orig_tgt!=null&&(t.close_reason==='TARGET_HIT'||t.close_reason==='SL_HIT'))
+    .map(t=>({
+      ret:logRet(t.entry_price,t.close_price),
+      reason:t.close_reason==='TARGET_HIT'?'WIN':'LOSS',
+      setup:t.setup_type,
+      days:daysBetween(t.entry_date,t.close_date)
+    }));
 
   const combosMeta=[];
   LBS.forEach(lb=>['full','downside'].forEach(vt=>KS.forEach(k=>combosMeta.push({vt,lb,k}))));
 
-  let html=`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
-    <th>COMBINATION</th>
-    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
-    <th>MOM — WIN%</th><th>MOM — AVG RET</th>
-    <th>REV — WIN%</th><th>REV — AVG RET</th>
-  </tr></thead><tbody>`;
-
-  function buildRow(label,rows,isOrig){
-    const all=statsFor(rows,null,'WIN'), mom=statsFor(rows.filter(r=>r.setup==='MOMENTUM'),null,'WIN'), rev=statsFor(rows.filter(r=>r.setup==='REVERSAL'),null,'WIN');
-    const color=(v)=>v==='—'?'var(--muted)':(parseFloat(v)>=50?'var(--green)':'var(--red)');
-    const colorRet=(v)=>v==='—'?'var(--muted)':(parseFloat(v)>=0?'var(--green)':'var(--red)');
-    return `<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">
-      <td style="font-family:var(--mono);font-size:11px">${label}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${color(all.wr)}">${all.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${color(mom.wr)}">${mom.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(mom.avgRet)}">${mom.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${color(rev.wr)}">${rev.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(rev.avgRet)}">${rev.avgRet}</td>
-    </tr>`;
-  }
-
-  const origMapped=origRows.map(t=>({ret:logRet(t.entry_price,t.close_price),reason:t.close_reason==='TARGET_HIT'?'WIN':'LOSS',setup:t.setup_type}));
-  html+=buildRow('Original SL/TGT',origMapped,true);
-
-  combosMeta.forEach(({vt,lb,k})=>{
+  const combos=combosMeta.map(({vt,lb,k})=>{
     const rows=[];
     closed.forEach(t=>{
       const c=findCombo(t,vt,lb,k);
       if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')){
-        rows.push({ret:c.log_return,reason:c.close_reason==='TARGET_HIT'?'WIN':'LOSS',setup:t.setup_type});
+        rows.push({
+          ret:c.log_return,
+          reason:c.close_reason==='TARGET_HIT'?'WIN':'LOSS',
+          setup:t.setup_type,
+          days:daysBetween(t.entry_date,c.close_date)
+        });
       }
     });
-    const label=`${vt==='full'?'FV':'DV'} ${lb}d k${k}`;
-    html+=buildRow(label,rows,false);
+    return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows};
   });
 
+  return{origRows,combos,closedCount:closed.length};
+}
+
+function statsFor(rows){
+  if(!rows.length) return{wr:'—',avgRet:'—',n:0};
+  const wins=rows.filter(r=>r.reason==='WIN').length;
+  const wr=((wins/rows.length)*100).toFixed(1)+'%';
+  const avgRet=(rows.reduce((s,r)=>s+(r.ret||0),0)/rows.length*100).toFixed(2)+'%';
+  return{wr,avgRet,n:rows.length};
+}
+function colorWr(v){return v==='—'?'var(--muted)':(parseFloat(v)>=50?'var(--green)':'var(--red)');}
+function colorRet(v){return v==='—'?'var(--muted)':(parseFloat(v)>=0?'var(--green)':'var(--red)');}
+
+function renderAnalysis(){
+  const data=buildAnalysisData();
+  if(!data.closedCount){
+    document.getElementById('analysis-content').innerHTML='<div class="empty">Close some trades to see analysis.</div>';
+    return;
+  }
+  const subtabs=`<div class="subtabs">
+    <button class="subtab ${analysisView==='combos'?'active':''}" onclick="switchAnalysisView('combos')">Combinations</button>
+    <button class="subtab ${analysisView==='marginal'?'active':''}" onclick="switchAnalysisView('marginal')">Marginal Effects</button>
+    <button class="subtab ${analysisView==='interaction'?'active':''}" onclick="switchAnalysisView('interaction')">Interaction Grids</button>
+  </div>`;
+  let body='';
+  if(analysisView==='combos') body=renderCombosView(data);
+  else if(analysisView==='marginal') body=renderMarginalView(data);
+  else body=renderInteractionView(data);
+  document.getElementById('analysis-content').innerHTML=subtabs+body;
+}
+
+function switchAnalysisView(v){
+  analysisView=v;
+  renderAnalysis();
+}
+
+// 2a: combination heatmap, now with AVG DAYS (WIN)/(LOSS) columns.
+function renderCombosView(data){
+  function buildRow(label,rows,isOrig){
+    const all=statsFor(rows), mom=statsFor(rows.filter(r=>r.setup==='MOMENTUM')), rev=statsFor(rows.filter(r=>r.setup==='REVERSAL'));
+    return`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">
+      <td style="font-family:var(--mono);font-size:11px">${label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(all.wr)}">${all.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
+      <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
+      <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(mom.wr)}">${mom.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(mom.avgRet)}">${mom.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(rev.wr)}">${rev.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(rev.avgRet)}">${rev.avgRet}</td>
+    </tr>`;
+  }
+  let html=`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
+    <th>COMBINATION</th>
+    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
+    <th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
+    <th>MOM — WIN%</th><th>MOM — AVG RET</th>
+    <th>REV — WIN%</th><th>REV — AVG RET</th>
+  </tr></thead><tbody>`;
+  html+=buildRow('Original SL/TGT',data.origRows,true);
+  data.combos.forEach(c=>{html+=buildRow(c.label,c.rows,false);});
   html+='</tbody></table></div>';
-  document.getElementById('analysis-content').innerHTML=html;
+  return html;
+}
+
+// 2b: Marginal Effects — collapse across the other two dimensions so each
+// table isolates the effect of one lever (k, vol type, or lookback) alone.
+function renderMarginalView(data){
+  function tableFor(title,groupKeyFn,groupLabels){
+    const groups={};
+    data.combos.forEach(c=>{
+      const key=groupKeyFn(c);
+      if(!groups[key]) groups[key]=[];
+      groups[key].push(...c.rows);
+    });
+    let html=`<div class="grid-title">${title}</div><div style="overflow-x:auto"><table class="tbl"><thead><tr>
+      <th>VALUE</th><th>WIN%</th><th>AVG RET</th><th>N</th><th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
+    </tr></thead><tbody>`;
+    groupLabels.forEach(g=>{
+      const rows=groups[g]||[];
+      const s=statsFor(rows);
+      html+=`<tr>
+        <td style="font-family:var(--mono);font-size:11px">${g}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorWr(s.wr)}">${s.wr}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRet)}">${s.avgRet}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.n}</td>
+        <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
+        <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>
+      </tr>`;
+    });
+    html+='</tbody></table></div>';
+    return html;
+  }
+  let out='';
+  out+=tableFor('By k multiplier (collapsed across vol type &amp; lookback)', c=>String(c.k), KS.map(String));
+  out+=tableFor('By vol type (collapsed across k &amp; lookback)', c=>c.vt==='full'?'Full Vol':'Downside Vol', ['Full Vol','Downside Vol']);
+  out+=tableFor('By lookback (collapsed across k &amp; vol type)', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
+  return out;
+}
+
+// 2c: Interaction Grids — each lever crossed with setup type (MOM vs REV),
+// plus a placeholder for the duration-based interaction we don't have
+// enough data for yet.
+function renderInteractionView(data){
+  function gridFor(title,groupKeyFn,groupLabels){
+    const groups={};
+    data.combos.forEach(c=>{
+      const key=groupKeyFn(c);
+      if(!groups[key]) groups[key]={MOMENTUM:[],REVERSAL:[]};
+      groups[key].MOMENTUM.push(...c.rows.filter(r=>r.setup==='MOMENTUM'));
+      groups[key].REVERSAL.push(...c.rows.filter(r=>r.setup==='REVERSAL'));
+    });
+    let html=`<div class="grid-title">${title}</div><div style="overflow-x:auto"><table class="tbl"><thead><tr>
+      <th>VALUE</th><th>MOM — WIN%</th><th>MOM — AVG RET</th><th>MOM — N</th>
+      <th>REV — WIN%</th><th>REV — AVG RET</th><th>REV — N</th>
+    </tr></thead><tbody>`;
+    groupLabels.forEach(g=>{
+      const mom=statsFor(groups[g]?.MOMENTUM||[]), rev=statsFor(groups[g]?.REVERSAL||[]);
+      html+=`<tr>
+        <td style="font-family:var(--mono);font-size:11px">${g}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorWr(mom.wr)}">${mom.wr}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(mom.avgRet)}">${mom.avgRet}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${mom.n}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorWr(rev.wr)}">${rev.wr}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(rev.avgRet)}">${rev.avgRet}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${rev.n}</td>
+      </tr>`;
+    });
+    html+='</tbody></table></div>';
+    return html;
+  }
+  let out='';
+  out+=gridFor('k × setup', c=>String(c.k), KS.map(String));
+  out+=gridFor('Vol type × setup', c=>c.vt==='full'?'Full Vol':'Downside Vol', ['Full Vol','Downside Vol']);
+  out+=gridFor('Lookback × setup', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
+  out+=`<div class="placeholder-note">Duration × setup (e.g. "does k=2 resolve faster on momentum vs. reversal trades") isn't shown yet — it needs the AVG DAYS figures in the Combinations view to build up across enough closed trades first. Once there's a reasonable sample per cell, this becomes a fourth grid here.</div>`;
+  return out;
 }
 
 function exportAnalysis(){
-  const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
-  if(!closed.length){toast('No closed trades to analyse','err');return;}
-  const combosMeta=[{vt:null,lb:null,k:null,label:'Original SL/TGT',isOrig:true}];
-  LBS.forEach(lb=>['full','downside'].forEach(vt=>KS.forEach(k=>combosMeta.push({vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,isOrig:false}))));
-  const headers=['Combination','Setup','N','Wins','Win%','Avg Log Return%'];
-  const rows=[headers.join(',')];
+  const data=buildAnalysisData();
+  if(!data.closedCount){toast('No closed trades to analyse','err');return;}
+  const rowsAll=[{label:'Original SL/TGT',rows:data.origRows},...data.combos.map(c=>({label:c.label,rows:c.rows}))];
+  const headers=['Combination','Setup','N','Wins','Win%','Avg Log Return%','Avg Days (Win)','Avg Days (Loss)'];
+  const out=[headers.join(',')];
   ['ALL','MOMENTUM','REVERSAL'].forEach(st=>{
-    combosMeta.forEach(m=>{
-      let arr=[];
-      if(m.isOrig){
-        arr=closed.filter(t=>t.orig_sl!=null&&t.orig_tgt!=null&&(t.close_reason==='TARGET_HIT'||t.close_reason==='SL_HIT')&&(st==='ALL'||t.setup_type===st))
-          .map(t=>({win:t.close_reason==='TARGET_HIT',ret:Math.log(t.close_price/t.entry_price)}));
-      }else{
-        closed.forEach(t=>{
-          if(st!=='ALL'&&t.setup_type!==st) return;
-          const c=findCombo(t,m.vt,m.lb,m.k);
-          if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')) arr.push({win:c.close_reason==='TARGET_HIT',ret:c.log_return});
-        });
-      }
-      if(!arr.length) return;
-      const wins=arr.filter(a=>a.win).length;
-      const wr=((wins/arr.length)*100).toFixed(1);
-      const avgRet=(arr.reduce((s,a)=>s+(a.ret||0),0)/arr.length*100).toFixed(2);
-      rows.push([m.label,st,arr.length,wins,wr,avgRet].join(','));
+    rowsAll.forEach(r=>{
+      const rows=st==='ALL'?r.rows:r.rows.filter(x=>x.setup===st);
+      if(!rows.length) return;
+      const wins=rows.filter(x=>x.reason==='WIN').length;
+      const wr=((wins/rows.length)*100).toFixed(1);
+      const avgRet=(rows.reduce((s,x)=>s+(x.ret||0),0)/rows.length*100).toFixed(2);
+      out.push([r.label,st,rows.length,wins,wr,avgRet,avgDaysFmt(rows,'WIN'),avgDaysFmt(rows,'LOSS')].join(','));
     });
   });
-  const blob=new Blob([rows.join('\n')],{type:'text/csv'});
+  const blob=new Blob([out.join('\n')],{type:'text/csv'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download=`volstop_analysis_${new Date().toISOString().split('T')[0]}.csv`; a.click();
 }
@@ -919,22 +1090,37 @@ function openEdit(id){
   editingId=id;
   const t=ALL_TRADES.find(x=>x.id===id);
   document.getElementById('e-ticker').value=t.ticker;
-  document.getElementById('e-price').value=t.entry_price??t.buy_above;
+  // buy_above is the field the Worker's PENDING→OPEN trigger actually checks
+  // (high >= trade.buy_above). entry_price is a derived field the Worker
+  // sets itself once the trigger fires, and is only shown here as a fallback
+  // for already-OPEN/CLOSED trades where buy_above and entry_price match.
+  document.getElementById('e-price').value=t.buy_above??t.entry_price;
   document.getElementById('e-date').value=t.entry_date||t.call_timestamp?.slice(0,10)||'';
   document.getElementById('e-setup').value=t.setup_type;
   document.getElementById('modal-edit').classList.add('show');
 }
 async function confirmEdit(){
   if(!editingId) return;
+  const t=ALL_TRADES.find(x=>x.id===editingId);
+  const newPrice=parseFloat(document.getElementById('e-price').value);
+  const patch={
+    ticker:document.getElementById('e-ticker').value.trim().toUpperCase(),
+    entry_date:document.getElementById('e-date').value,
+    setup_type:document.getElementById('e-setup').value,
+    buy_above:newPrice
+  };
+  // Only touch entry_price for trades that have already triggered — for a
+  // PENDING trade, entry_price must stay null until the recheck below
+  // actually confirms price crossed the new buy_above.
+  if(t.state!=='PENDING') patch.entry_price=newPrice;
   try{
-    await apiUpdateTrade(editingId,{
-      ticker:document.getElementById('e-ticker').value.trim().toUpperCase(),
-      entry_price:parseFloat(document.getElementById('e-price').value),
-      entry_date:document.getElementById('e-date').value,
-      setup_type:document.getElementById('e-setup').value
-    });
+    await apiUpdateTrade(editingId,patch);
+    // buy_above just changed — PUT only merges fields, it doesn't re-run the
+    // trigger check, so without this the trade would silently keep waiting
+    // on the OLD price (exactly the bug that was just reported).
+    await apiRecheckTrade(editingId);
     closeModal('modal-edit'); await refreshAll();
-    toast('Trade updated ✓','ok');
+    toast('Trade updated ✓ — rechecked against latest prices','ok');
   }catch(e){toast(e.message,'err');}
 }
 async function delTrade(id){
@@ -997,4 +1183,3 @@ refreshAll();
 </script>
 </body>
 </html>
-
