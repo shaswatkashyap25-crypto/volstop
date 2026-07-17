@@ -109,6 +109,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .tracking-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#1a2e3d;color:var(--accent);margin-left:4px}
 .status-pending{color:var(--muted)}
 .status-open{color:var(--amber)}
+.replay-err-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#3d1414;color:var(--red);margin-left:4px;cursor:help}
 .empty{text-align:center;padding:48px;color:var(--muted);font-family:var(--mono);font-size:12px}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;align-items:center;justify-content:center}
 .modal-overlay.show{display:flex}
@@ -208,6 +209,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     </div>
     <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
     <button class="btn-sec" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
+    <button class="exp-btn" style="width:100%" onclick="openDismissedModal()">Manage dismissed trades</button>
     <div id="parsed-list"></div>
     <button class="btn-main" id="btn-log-all" style="display:none" onclick="logAllParsed()">↓ Log all trades</button>
   </div>
@@ -308,7 +310,35 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-edit')">Cancel</button>
-      <button class="btn-confirm-accent" onclick="confirmEdit()">Save</button>
+      <button class="btn-confirm-accent" id="btn-confirm-edit" onclick="confirmEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal-overlay" id="modal-delete">
+  <div class="modal">
+    <h3 id="modal-delete-title">Delete trade</h3>
+    <div class="modal-form">
+      <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);font-family:var(--mono);cursor:pointer">
+        <input type="checkbox" id="del-dismiss-check" style="width:auto"/>
+        Also stop this from being suggested again on future TG fetches
+      </label>
+    </div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeModal('modal-delete')">Cancel</button>
+      <button class="btn-confirm-accent" style="background:var(--red)" onclick="confirmDelete()">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Dismissed Trades Modal -->
+<div class="modal-overlay" id="modal-dismissed">
+  <div class="modal" style="width:380px">
+    <h3>Dismissed trades</h3>
+    <div id="dismissed-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto"></div>
+    <div class="modal-acts">
+      <button class="btn-cancel" onclick="closeModal('modal-dismissed')" style="flex:1">Close</button>
     </div>
   </div>
 </div>
@@ -361,27 +391,75 @@ async function yahooFetch(url){
   return null;
 }
 
+// Fetches historical stock-split events (e.g. 5:1) between two epochs.
+// Needed to bring historical closes onto today's post-split price scale
+// before computing volatility -- otherwise a stock that split within the
+// lookback window shows one giant fake single-day "return" on the split
+// date, which dominates the standard-deviation calculation and massively
+// inflates annualized vol (this is exactly what was happening to KRISHANA).
+async function fetchSplitEvents(sym, fromEpochSec, toEpochSec){
+  try{
+    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${fromEpochSec}&period2=${toEpochSec}&events=splits`);
+    const splits=j?.chart?.result?.[0]?.events?.splits;
+    if(!splits) return [];
+    return Object.values(splits).map(s=>({date:s.date,ratio:s.numerator/s.denominator})).sort((a,b)=>a.date-b.date);
+  }catch(e){return [];}
+}
+
+// Divides every price BEFORE a split date by that split's ratio, bringing
+// pre-split prices onto the same per-share scale as post-split prices --
+// the standard definition of a "split-adjusted" close. Nulls (missing-data
+// gaps) are passed through untouched rather than coerced to 0.
+function applySplitAdjustment(epochsSec,closes,splits){
+  if(!splits.length) return closes;
+  return closes.map((c,i)=>{
+    if(c==null) return null;
+    let adj=c;
+    for(const s of splits){ if(epochsSec[i]<s.date) adj/=s.ratio; }
+    return adj;
+  });
+}
+
 async function fetchPrices(ticker, forDate=null){
+  const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
+  const start=new Date(end); start.setDate(start.getDate()-420);
+  const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
+  const yahooSym=ticker.replace(/\.(NS|BO)$/i,'')+'.NS'; // used for split-event lookups regardless of which price source succeeds
+
   try{
     const sym=toFyersSym(ticker);
-    const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
-    const start=new Date(end); start.setDate(start.getDate()-420);
-    const j=await fyersFetch(`/data/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${Math.floor(start/1000)}&range_to=${Math.floor(end/1000)}&cont_flag=1`);
+    const j=await fyersFetch(`/data/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${p1}&range_to=${p2}&cont_flag=1`);
     if(j?.s==='ok'&&j?.candles?.length>=20){
-      return{sym:ticker.replace(/\.(NS|BO)$/i,'')+'.NS', closes:j.candles.map(c=>c[4])};
+      const epochs=j.candles.map(c=>c[0]);
+      let closes=j.candles.map(c=>c[4]);
+      // Fyers' history endpoint doesn't self-adjust for splits -- fetch
+      // split events separately (from Yahoo, same as checkSplits() already
+      // does) and apply them to the raw Fyers closes before returning.
+      const splits=await fetchSplitEvents(yahooSym,p1,p2);
+      closes=applySplitAdjustment(epochs,closes,splits);
+      return{sym:yahooSym, closes};
     }
   }catch(e){}
   const raw=ticker.replace(/\.(NS|BO)$/i,'');
   const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
-  const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
-  const start=new Date(end); start.setDate(start.getDate()-420);
-  const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
   for(const sfx of trySfx){
     const sym=raw+sfx;
-    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
+    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
     if(!j) continue;
-    const closes=j?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-    const clean=closes?closes.filter(Boolean):[];
+    const result=j?.chart?.result?.[0];
+    const adjcloseArr=result?.indicators?.adjclose?.[0]?.adjclose;
+    let clean;
+    if(adjcloseArr&&adjcloseArr.some(v=>v!=null)){
+      // Yahoo already provides a split+dividend adjusted close series when
+      // available -- use it directly rather than re-deriving it.
+      clean=adjcloseArr.filter(v=>v!=null);
+    }else{
+      const rawCloses=result?.indicators?.quote?.[0]?.close;
+      const epochs=result?.timestamp;
+      const splits=result?.events?.splits?Object.values(result.events.splits).map(s=>({date:s.date,ratio:s.numerator/s.denominator})).sort((a,b)=>a.date-b.date):[];
+      const adjusted=(rawCloses&&epochs)?applySplitAdjustment(epochs,rawCloses,splits):rawCloses;
+      clean=adjusted?adjusted.filter(v=>v!=null):[];
+    }
     if(clean.length>=20) return{sym,closes:clean};
   }
   throw new Error('No data for '+ticker);
@@ -468,6 +546,22 @@ async function apiRecheckTrade(id){
   if(!r.ok) throw new Error(j.error||'Recheck failed');
   return j.trade;
 }
+async function apiGetDismissed(){
+  const r=await fetch(WORKER+'/dismissed');
+  if(!r.ok) throw new Error('Failed to load dismissed list');
+  const j=await r.json();
+  return j.dismissed||[];
+}
+async function apiAddDismissed(ticker,date){
+  const r=await fetch(WORKER+'/dismissed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker,date})});
+  const j=await r.json();
+  if(!r.ok) throw new Error(j.error||'Dismiss failed');
+  return j.dismissed;
+}
+async function apiUndismiss(key){
+  const r=await fetch(WORKER+'/dismissed/'+encodeURIComponent(key),{method:'DELETE'});
+  if(!r.ok) throw new Error('Undo failed');
+}
 
 // Turns the flat combos[] from computeVol into the exact 42-entry shape the
 // Worker requires on POST /trades.
@@ -533,6 +627,9 @@ async function compute(){
   finally{btn.disabled=false; btn.innerHTML='Compute stops &amp; targets';}
 }
 
+function escapeAttr(s){
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function fmt(v,dec=2){
   if(v===undefined||v===null||v==='') return '—';
   return parseFloat(v).toLocaleString('en-IN',{minimumFractionDigits:dec});
@@ -687,14 +784,28 @@ async function fetchTGTrades(){
       headers.forEach((h,i)=>obj[h]=vals[i]?.trim()||'');
       return obj;
     });
-    // Dedupe against trades already logged (same ticker + same entry_date)
-    if(!ALL_TRADES.length) ALL_TRADES=await apiGetTrades();
-    const existingKeys=new Set(ALL_TRADES.map(t=>`${t.ticker.replace(/\.(NS|BO)$/i,'')}_${t.entry_date||t.call_timestamp?.slice(0,10)}`));
-    let added=0;
+    // Dedupe against trades already logged (same ticker + same message date).
+    // Always pull a fresh list here rather than trusting whatever's already
+    // in memory -- the local cache only updates after actions taken in THIS
+    // browser tab, so a trade deleted a while ago, in another tab, or before
+    // a page reload could still look "already logged" against stale data.
+    ALL_TRADES=await apiGetTrades();
+    // Match on call_timestamp (the message-posted date) on both sides,
+    // not entry_date -- entry_date only gets set once a trade actually
+    // triggers, so comparing it against the CSV's message-date would falsely
+    // treat an already-triggered trade as new and re-import a duplicate.
+    const existingKeys=new Set(ALL_TRADES.map(t=>`${t.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase()}_${t.call_timestamp?.slice(0,10)}`));
+    // Also exclude anything explicitly dismissed -- same ticker+date key
+    // format, so a dismissal only blocks that specific past recommendation,
+    // not a genuinely new call on the same ticker later.
+    const dismissedItems=await apiGetDismissed().catch(()=>[]);
+    const dismissedKeys=new Set(dismissedItems.map(d=>d.key));
+    let added=0, skippedDismissed=0;
     for(const row of rows){
       if(!row.ticker||!row.entry_price) continue;
-      const key=`${row.ticker}_${row.entry_date}`;
+      const key=`${row.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase()}_${row.entry_date}`;
       if(existingKeys.has(key)) continue;
+      if(dismissedKeys.has(key)){ skippedDismissed++; continue; }
       addParsedItem({
         ticker:row.ticker, entry:parseFloat(row.entry_price),
         origSl:row.orig_sl?parseFloat(row.orig_sl):null,
@@ -703,8 +814,11 @@ async function fetchTGTrades(){
       });
       added++;
     }
-    if(!added){toast('No new trades — everything in the CSV is already logged','ok');return;}
-    toast(`${added} new trade${added>1?'s':''} found — review and log below`,'ok');
+    if(!added){
+      toast(skippedDismissed?`No new trades (${skippedDismissed} dismissed & skipped)`:'No new trades — everything in the CSV is already logged','ok');
+      return;
+    }
+    toast(`${added} new trade${added>1?'s':''} found${skippedDismissed?` (${skippedDismissed} dismissed & skipped)`:''} — review and log below`,'ok');
     document.getElementById('btn-log-all').style.display='block';
   }catch(e){toast('Fetch failed: '+e.message,'err');}
 }
@@ -817,7 +931,7 @@ function renderTrades(){
     <td class="tgt-val">${dv20k2?'₹'+fmt(dv20k2.target):'—'}</td>
     <td class="fv-val">${fvAnn??'—'}%</td>
     <td class="dv-val">${dvAnn??'—'}%</td>
-    <td class="status-${t.state.toLowerCase()}">${t.state}</td>
+    <td class="status-${t.state.toLowerCase()}">${t.state}${t.replay_error?` <span class="replay-err-badge" title="${escapeAttr(t.replay_error)}">⚠ replay failed</span>`:''}</td>
     <td>
       <button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>
       <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
@@ -1099,48 +1213,124 @@ function openEdit(id){
   document.getElementById('e-setup').value=t.setup_type;
   document.getElementById('modal-edit').classList.add('show');
 }
+// Rebuilds each vol combo into a fresh PENDING record -- mirrors what the
+// Worker's buildNewTrade() does for a brand-new trade. Needed whenever
+// stop/target levels are recomputed: any state/close_reason/log_return that
+// was previously resolved against the OLD stop/target no longer means
+// anything once the price levels themselves have changed, so it's reset
+// rather than carried forward incorrectly.
+function comboSkeleton(combos){
+  return combos.map(c=>({
+    vol_type:c.vol_type,k:c.k,lookback:c.lookback,stop:c.stop,target:c.target,
+    state:'PENDING',close_reason:null,close_date:null,close_price:null,log_return:null
+  }));
+}
+
 async function confirmEdit(){
   if(!editingId) return;
   const t=ALL_TRADES.find(x=>x.id===editingId);
   const newPrice=parseFloat(document.getElementById('e-price').value);
-  const patch={
-    ticker:document.getElementById('e-ticker').value.trim().toUpperCase(),
-    entry_date:document.getElementById('e-date').value,
-    setup_type:document.getElementById('e-setup').value,
-    buy_above:newPrice
-  };
-  // Only touch entry_price for trades that have already triggered — for a
-  // PENDING trade, entry_price must stay null until the recheck below
-  // actually confirms price crossed the new buy_above.
-  if(t.state!=='PENDING') patch.entry_price=newPrice;
+  const newDate=document.getElementById('e-date').value;
+  const newTicker=document.getElementById('e-ticker').value.trim().toUpperCase();
+  const newSetup=document.getElementById('e-setup').value;
+  const btn=document.getElementById('btn-confirm-edit');
+  btn.disabled=true; btn.textContent='Recalculating…';
   try{
+    // Entry price is changing — stop/target = entry * exp(±k*vol/√252), so
+    // they must be recomputed from scratch, not left at whatever they were
+    // under the old entry price. Vol% itself barely moves over a few days,
+    // but the absolute ₹ stop/target levels scale directly with entry price.
+    const d=await computeVol(newTicker,newPrice,newSetup,newDate);
+    const patch={
+      ticker:d.ticker,
+      entry_date:newDate,
+      setup_type:newSetup,
+      buy_above:newPrice,
+      vol_annualized:d.vol_annualized,
+      vol_combinations:comboSkeleton(d.combos)
+    };
+    // Only touch entry_price for trades that have already triggered — for a
+    // PENDING trade, entry_price must stay null until the recheck below
+    // actually confirms price crossed the new buy_above.
+    if(t.state!=='PENDING') patch.entry_price=newPrice;
     await apiUpdateTrade(editingId,patch);
     // buy_above just changed — PUT only merges fields, it doesn't re-run the
     // trigger check, so without this the trade would silently keep waiting
-    // on the OLD price (exactly the bug that was just reported).
+    // on the OLD price.
     await apiRecheckTrade(editingId);
     closeModal('modal-edit'); await refreshAll();
-    toast('Trade updated ✓ — rechecked against latest prices','ok');
+    toast('Trade updated ✓ — SL/TGT recalculated & rechecked','ok');
   }catch(e){toast(e.message,'err');}
+  finally{ btn.disabled=false; btn.textContent='Save'; }
 }
-async function delTrade(id){
+let deletingId=null;
+function delTrade(id){
+  deletingId=id;
   const t=ALL_TRADES.find(x=>x.id===id);
-  if(!confirm(`Delete ${t.ticker} (${t.entry_date||t.call_timestamp?.slice(0,10)})?`)) return;
+  document.getElementById('modal-delete-title').textContent=`Delete ${t.ticker} (${t.entry_date||t.call_timestamp?.slice(0,10)})?`;
+  document.getElementById('del-dismiss-check').checked=false; // opt-in, not opt-out
+  document.getElementById('modal-delete').classList.add('show');
+}
+async function confirmDelete(){
+  if(!deletingId) return;
+  const t=ALL_TRADES.find(x=>x.id===deletingId);
+  const alsoDismiss=document.getElementById('del-dismiss-check').checked;
   try{
-    await apiDeleteTrade(id); await refreshAll();
-    toast('Deleted','ok');
+    await apiDeleteTrade(deletingId);
+    if(alsoDismiss&&t){
+      const key=t.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase();
+      const date=t.call_timestamp?.slice(0,10);
+      if(date) await apiAddDismissed(key,date);
+    }
+    closeModal('modal-delete'); await refreshAll();
+    toast(alsoDismiss?'Deleted & dismissed ✓':'Deleted','ok');
+  }catch(e){toast(e.message,'err');}
+  deletingId=null;
+}
+
+async function openDismissedModal(){
+  document.getElementById('modal-dismissed').classList.add('show');
+  await renderDismissedList();
+}
+async function renderDismissedList(){
+  const el=document.getElementById('dismissed-list');
+  el.innerHTML='<div class="empty" style="padding:20px">Loading…</div>';
+  try{
+    const items=await apiGetDismissed();
+    if(!items.length){el.innerHTML='<div class="empty" style="padding:20px">No dismissed trades.</div>';return;}
+    items.sort((a,b)=>b.dismissed_at.localeCompare(a.dismissed_at));
+    el.innerHTML=items.map(d=>`
+      <div class="parsed-item" style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <span class="parsed-ticker">${d.ticker}</span>
+          <span class="parsed-orig" style="display:block;margin-top:2px">${d.date}</span>
+        </div>
+        <button class="btn-recheck-tr" onclick="undoDismiss('${d.key}')">Undo</button>
+      </div>`).join('');
+  }catch(e){el.innerHTML=`<div class="empty" style="padding:20px">${e.message}</div>`;}
+}
+async function undoDismiss(key){
+  try{
+    await apiUndismiss(key);
+    toast('Un-dismissed ✓','ok');
+    await renderDismissedList();
   }catch(e){toast(e.message,'err');}
 }
 async function manualRecheck(id){
   toast('Rechecking against latest prices…','');
   try{
-    await apiRecheckTrade(id); await refreshAll();
-    toast('Recheck complete','ok');
+    const t=await apiRecheckTrade(id);
+    await refreshAll();
+    // The Worker returns HTTP 200 even when the recheck did nothing (e.g. no
+    // Fyers token available) — replay_error is the only signal that
+    // distinguishes "ran and found nothing new" from "didn't actually run."
+    if(t.replay_error) toast('Recheck ran but did nothing: '+t.replay_error,'err');
+    else toast('Recheck complete','ok');
   }catch(e){toast(e.message,'err');}
 }
 function closeModal(id){
   document.getElementById(id).classList.remove('show');
-  closingId=null; editingId=null;
+  closingId=null; editingId=null; deletingId=null;
 }
 
 // ── Export ──
