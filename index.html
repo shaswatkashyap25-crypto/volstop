@@ -425,23 +425,20 @@ function applySplitAdjustment(epochsSec,closes,splits){
 // and only falls back to manually adjusting the raw close using this same
 // response's split events if adjclose isn't present.
 async function fetchYahooAdjustedCloses(sym, p1, p2){
-  const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
+  const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}`);
   if(!j) return null;
   const result=j?.chart?.result?.[0];
   const rawCloses=result?.indicators?.quote?.[0]?.close;
-  const epochs=result?.timestamp;
-  if(!rawCloses||!epochs) return null;
-  // Always derive the adjustment ourselves from raw close + the events.splits
-  // list, rather than trusting Yahoo's adjclose field. Confirmed directly:
-  // adjclose can be present and non-null while still being IDENTICAL to raw
-  // close across a real, known split -- Yahoo can register the split event
-  // before its adjclose series has actually been backfilled to reflect it,
-  // especially for a very recent corporate action on a smaller stock. The
-  // events.splits list itself was reliably present even while adjclose
-  // lagged, so it's the more trustworthy source here.
-  const splits=result?.events?.splits?Object.values(result.events.splits).map(s=>({date:s.date,ratio:s.numerator/s.denominator})).sort((a,b)=>a.date-b.date):[];
-  const adjusted=applySplitAdjustment(epochs,rawCloses,splits);
-  return adjusted.filter(v=>v!=null);
+  if(!rawCloses) return null;
+  // Yahoo's raw "close" series for NSE equities is already split-adjusted
+  // -- confirmed directly against real data spanning KRISHANA's actual
+  // 2026-07-03 split date, which shows a smooth ₹130-150 range with no
+  // discontinuity at all. Manually re-applying a split adjustment on top of
+  // this (as a previous version of this function did) was actively harmful:
+  // it divided the already-correct pre-split values by the split ratio
+  // again, fabricating a 5x cliff where none existed and spiking computed
+  // vol to 597%. Use Yahoo's raw close as-is.
+  return rawCloses.filter(v=>v!=null);
 }
 
 async function fetchPrices(ticker, forDate=null){
