@@ -795,14 +795,28 @@ async function fetchTGTrades(){
     const r=await fetch(url);
     if(!r.ok) throw new Error('Could not fetch TG trades CSV');
     const text=await r.text();
-    const lines=text.trim().split('\n');
-    if(lines.length<2){toast('No trades in CSV yet','err');return;}
-    const headers=lines[0].split(',').map(h=>h.trim());
-    const rows=lines.slice(1).map(l=>{
-      const vals=l.split(',');
-      const obj={};
-      headers.forEach((h,i)=>obj[h]=vals[i]?.trim()||'');
-      return obj;
+    const lines=text.trim().split('\n').filter(l=>l.trim());
+    if(!lines.length){toast('No trades in CSV yet','err');return;}
+    // This CSV has NO header row -- it's raw scraped data with a fixed
+    // positional structure: id,ticker,setup_type,date,time,buy_above,,,message
+    // SL/TGT are not separate columns; they're embedded in the trailing
+    // free-text message (e.g. "#POSITIONAL BANKINDIA BUY ABOVE: 161 SL:
+    // 159.5 TGT: 165.5 Holding Period: 30 Days"), extracted the same way
+    // parsePaste() already extracts them from a pasted WhatsApp message.
+    const rows=lines.map(line=>{
+      const parts=line.split(',');
+      const[,ticker,setupRaw,date,,priceStr,,,...rest]=parts;
+      const messageText=rest.join(',');
+      const slMatch=messageText.match(/SL:\s*([\d.]+)/i);
+      const tgtMatch=messageText.match(/TGT:\s*([\d.]+)/i);
+      return{
+        ticker:(ticker||'').trim().toUpperCase(),
+        entry_price:parseFloat(priceStr),
+        orig_sl:slMatch?parseFloat(slMatch[1]):null,
+        orig_tgt:tgtMatch?parseFloat(tgtMatch[1]):null,
+        entry_date:(date||'').trim(),
+        setup_type:(setupRaw||'').trim().toUpperCase()||null
+      };
     });
     // Dedupe against trades already logged (same ticker + same message date).
     // Always pull a fresh list here rather than trusting whatever's already
