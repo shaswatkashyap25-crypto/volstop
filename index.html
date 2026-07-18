@@ -420,48 +420,63 @@ function applySplitAdjustment(epochsSec,closes,splits){
   });
 }
 
+// Tries to get a clean, split-adjusted close series from Yahoo for one
+// symbol. Prefers Yahoo's own adjclose (authoritative, maintained by Yahoo)
+// and only falls back to manually adjusting the raw close using this same
+// response's split events if adjclose isn't present.
+async function fetchYahooAdjustedCloses(sym, p1, p2){
+  const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
+  if(!j) return null;
+  const result=j?.chart?.result?.[0];
+  const adjcloseArr=result?.indicators?.adjclose?.[0]?.adjclose;
+  if(adjcloseArr&&adjcloseArr.some(v=>v!=null)){
+    return adjcloseArr.filter(v=>v!=null);
+  }
+  const rawCloses=result?.indicators?.quote?.[0]?.close;
+  const epochs=result?.timestamp;
+  const splits=result?.events?.splits?Object.values(result.events.splits).map(s=>({date:s.date,ratio:s.numerator/s.denominator})).sort((a,b)=>a.date-b.date):[];
+  const adjusted=(rawCloses&&epochs)?applySplitAdjustment(epochs,rawCloses,splits):rawCloses;
+  return adjusted?adjusted.filter(v=>v!=null):[];
+}
+
 async function fetchPrices(ticker, forDate=null){
   const end=forDate?new Date(forDate):new Date(); end.setDate(end.getDate()+2);
   const start=new Date(end); start.setDate(start.getDate()-420);
   const p1=Math.floor(start/1000), p2=Math.floor(end/1000);
-  const yahooSym=ticker.replace(/\.(NS|BO)$/i,'')+'.NS'; // used for split-event lookups regardless of which price source succeeds
+  const raw=ticker.replace(/\.(NS|BO)$/i,'');
+  const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
 
+  // Yahoo first -- its adjclose series is maintained by Yahoo directly and
+  // already handles splits/dividends correctly, avoiding the fragile
+  // two-step "fetch raw prices from one source, splits from another, stitch
+  // manually" reconstruction that silently failed to catch KRISHANA's split
+  // (Yahoo's split-events endpoint can be unreliable when hit from a
+  // datacenter IP like a Cloudflare Worker, even though the main price data
+  // comes through fine).
+  for(const sfx of trySfx){
+    const sym=raw+sfx;
+    try{
+      const clean=await fetchYahooAdjustedCloses(sym,p1,p2);
+      if(clean&&clean.length>=20) return{sym,closes:clean};
+    }catch(e){}
+  }
+
+  // Fyers fallback -- only reached if Yahoo is completely unreachable.
+  // Fyers doesn't self-adjust for splits, so this path still needs the
+  // manual reconstruction and is inherently less reliable than the Yahoo
+  // path above -- flagged via splitAdjustmentUncertain so the UI can warn.
   try{
     const sym=toFyersSym(ticker);
     const j=await fyersFetch(`/data/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${p1}&range_to=${p2}&cont_flag=1`);
     if(j?.s==='ok'&&j?.candles?.length>=20){
       const epochs=j.candles.map(c=>c[0]);
       let closes=j.candles.map(c=>c[4]);
-      // Fyers' history endpoint doesn't self-adjust for splits -- fetch
-      // split events separately (from Yahoo, same as checkSplits() already
-      // does) and apply them to the raw Fyers closes before returning.
+      const yahooSym=raw+'.NS';
       const splits=await fetchSplitEvents(yahooSym,p1,p2);
       closes=applySplitAdjustment(epochs,closes,splits);
-      return{sym:yahooSym, closes};
+      return{sym:yahooSym, closes, splitAdjustmentUncertain:true};
     }
   }catch(e){}
-  const raw=ticker.replace(/\.(NS|BO)$/i,'');
-  const trySfx=ticker.match(/\.(NS|BO)$/i)?[ticker.match(/\.(NS|BO)$/i)[0].toUpperCase()]:['.NS','.BO'];
-  for(const sfx of trySfx){
-    const sym=raw+sfx;
-    const j=await yahooFetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&period1=${p1}&period2=${p2}&events=splits`);
-    if(!j) continue;
-    const result=j?.chart?.result?.[0];
-    const adjcloseArr=result?.indicators?.adjclose?.[0]?.adjclose;
-    let clean;
-    if(adjcloseArr&&adjcloseArr.some(v=>v!=null)){
-      // Yahoo already provides a split+dividend adjusted close series when
-      // available -- use it directly rather than re-deriving it.
-      clean=adjcloseArr.filter(v=>v!=null);
-    }else{
-      const rawCloses=result?.indicators?.quote?.[0]?.close;
-      const epochs=result?.timestamp;
-      const splits=result?.events?.splits?Object.values(result.events.splits).map(s=>({date:s.date,ratio:s.numerator/s.denominator})).sort((a,b)=>a.date-b.date):[];
-      const adjusted=(rawCloses&&epochs)?applySplitAdjustment(epochs,rawCloses,splits):rawCloses;
-      clean=adjusted?adjusted.filter(v=>v!=null):[];
-    }
-    if(clean.length>=20) return{sym,closes:clean};
-  }
   throw new Error('No data for '+ticker);
 }
 
@@ -499,11 +514,11 @@ function stopPx(entry,av,k){return parseFloat((entry*Math.exp(-k*(av/Math.sqrt(2
 function tgtPx(entry,av,k){return parseFloat((entry*Math.exp(+k*(av/Math.sqrt(252)))).toFixed(2));}
 
 async function computeVol(ticker, entry, setupType, forDate=null){
-  const{sym,closes}=await fetchPrices(ticker, forDate);
+  const{sym,closes,splitAdjustmentUncertain}=await fetchPrices(ticker, forDate);
   const lr=logReturns(closes);
   const d={ticker:sym, entry_price:entry, setup_type:setupType,
     entry_date:forDate||new Date().toISOString().split('T')[0],
-    history_days:lr.length,
+    history_days:lr.length, splitAdjustmentUncertain:!!splitAdjustmentUncertain,
     vol_annualized:{}, combos:[]}; // combos: flat list of {vol_type,k,lookback,stop,target} — vol_type is 'full'|'downside', matching the Worker's schema
   LBS.forEach(lb=>{
     const fv=fullVol(lr,lb), dv=downVol(lr,lb);
@@ -641,11 +656,16 @@ function renderResult(d){
   const b=document.getElementById('res-badge');
   b.textContent=d.setup_type; b.className='badge badge-'+(d.setup_type==='MOMENTUM'?'mom':'rev');
   const note=document.getElementById('history-note');
+  const notes=[];
   if(d.history_days<252){
     const missing=LBS.filter(lb=>d.history_days<lb);
-    note.textContent=`${d.history_days} days of history. ${missing.map(l=>l+'d').join(', ')} lookback skipped.`;
-    note.classList.add('show');
-  }else{note.classList.remove('show');}
+    notes.push(`${d.history_days} days of history. ${missing.map(l=>l+'d').join(', ')} lookback skipped.`);
+  }
+  if(d.splitAdjustmentUncertain){
+    notes.push('⚠ Used Fyers fallback data — split-adjustment could not be independently verified via Yahoo. Double-check this vol figure if the stock had a recent split/bonus.');
+  }
+  if(notes.length){ note.textContent=notes.join(' '); note.classList.add('show'); }
+  else{ note.classList.remove('show'); }
   document.getElementById('vol-grid').innerHTML=LBS.map(lb=>{
     const fv=d.vol_annualized[`fv_${lb}`],dv=d.vol_annualized[`dv_${lb}`];
     if(fv==null) return`<div class="vc"><div class="vc-lb">${lb}d</div><div class="vc-na">n/a</div></div>`;
