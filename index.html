@@ -801,7 +801,6 @@ function parsePaste(){
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
-  document.getElementById('btn-log-all').style.display='block';
 }
 
 async function fetchTGTrades(){
@@ -869,30 +868,51 @@ async function fetchTGTrades(){
       return;
     }
     toast(`${added} new trade${added>1?'s':''} found${skippedDismissed?` (${skippedDismissed} dismissed & skipped)`:''} — review and log below`,'ok');
-    document.getElementById('btn-log-all').style.display='block';
   }catch(e){toast('Fetch failed: '+e.message,'err');}
 }
 
+let parsedUidCounter=0;
 function addParsedItem(p){
-  const i=parsedTrades.length;
+  const uid='p'+(++parsedUidCounter);
+  p.uid=uid;
   parsedTrades.push(p);
   const el=document.createElement('div');
   el.className='parsed-item';
-  el.id=`parsed-${i}`;
-  el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span></div>
+  el.id=`parsed-${uid}`;
+  el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span>
+      <button class="btn-del-tr" style="margin-left:auto" onclick="removeParsedItem('${uid}')" title="Remove from this batch">✕</button></div>
     <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}${p.callTimestamp?' '+new Date(p.callTimestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Kolkata'})+' IST':''}</div>
     ${!p.setup?'<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px">No setup tag found — pick one below</div>':''}
     <div class="field"><label>SETUP</label><div class="seg">
-      <button id="ps-mom-${i}" onclick="setParsedSetup(${i},'MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
-      <button id="ps-rev-${i}" onclick="setParsedSetup(${i},'REVERSAL')" class="${p.setup==='REVERSAL'?'on-rev':''}">Reversal</button>
+      <button id="ps-mom-${uid}" onclick="setParsedSetup('${uid}','MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
+      <button id="ps-rev-${uid}" onclick="setParsedSetup('${uid}','REVERSAL')" class="${p.setup==='REVERSAL'?'on-rev':''}">Reversal</button>
     </div></div>`;
   document.getElementById('parsed-list').appendChild(el);
+  updateLogAllButton();
 }
 
-function setParsedSetup(i,val){
-  parsedTrades[i].setup=val;
-  document.getElementById(`ps-mom-${i}`).className=val==='MOMENTUM'?'on-mom':'';
-  document.getElementById(`ps-rev-${i}`).className=val==='REVERSAL'?'on-rev':'';
+function removeParsedItem(uid){
+  const idx=parsedTrades.findIndex(x=>x.uid===uid);
+  if(idx===-1) return;
+  parsedTrades.splice(idx,1);
+  document.getElementById('parsed-'+uid)?.remove();
+  updateLogAllButton();
+}
+
+function updateLogAllButton(){
+  const btn=document.getElementById('btn-log-all');
+  if(!parsedTrades.length){ btn.style.display='none'; return; }
+  btn.style.display='block';
+  btn.innerHTML=`↓ Log ${parsedTrades.length} trade${parsedTrades.length>1?'s':''}`;
+}
+
+
+function setParsedSetup(uid,val){
+  const item=parsedTrades.find(x=>x.uid===uid);
+  if(!item) return;
+  item.setup=val;
+  document.getElementById(`ps-mom-${uid}`).className=val==='MOMENTUM'?'on-mom':'';
+  document.getElementById(`ps-rev-${uid}`).className=val==='REVERSAL'?'on-rev':'';
 }
 
 async function logAllParsed(){
