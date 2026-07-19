@@ -406,6 +406,20 @@ async function fetchSplitEvents(sym, fromEpochSec, toEpochSec){
   }catch(e){return [];}
 }
 
+// Cumulative split factor between two dates (e.g. a trade's call date and
+// today) -- used when logging a past-dated/backtested trade whose window
+// might span a real split. A trade logged with pre-split price levels
+// (buy_above/orig_sl/orig_tgt) would silently never resolve once live
+// tracking compares it against post-split market prices, since the price
+// levels would be off by the split ratio going forward.
+async function getCumulativeSplitFactor(ticker, fromDate, toDate){
+  const sym=ticker.replace(/\.(NS|BO)$/i,'')+'.NS';
+  const p1=Math.floor(new Date(fromDate)/1000);
+  const p2=Math.floor(new Date(toDate)/1000)+172800;
+  const splits=await fetchSplitEvents(sym,p1,p2);
+  return splits.reduce((f,s)=>f*s.ratio,1);
+}
+
 // Divides every price BEFORE a split date by that split's ratio, bringing
 // pre-split prices onto the same per-share scale as post-split prices --
 // the standard definition of a "split-adjusted" close. Nulls (missing-data
@@ -885,22 +899,31 @@ async function logAllParsed(){
   if(!parsedTrades.length) return;
   const btn=document.getElementById('btn-log-all');
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>Fetching vol data…';
-  let success=0,fail=0;
+  let success=0,fail=0,splitAdjusted=0;
+  const today=new Date().toISOString().split('T')[0];
   for(const p of parsedTrades){
     try{
       const d=await computeVol(p.ticker,p.entry,p.setup,p.entryDate);
+      // If the call date is in the past, check whether a real split happened
+      // between then and today. If so, the message's original price levels
+      // (in pre-split terms) need rescaling to today's terms -- otherwise
+      // live price tracking, which naturally reflects the post-split scale,
+      // could never match against stale pre-split SL/TGT levels once the
+      // split executes mid-holding-period.
+      const factor=(p.entryDate&&p.entryDate<today)?await getCumulativeSplitFactor(p.ticker,p.entryDate,today):1;
+      if(factor!==1) splitAdjusted++;
       await apiCreateTrade({
-        ticker:d.ticker, setup_type:d.setup_type, buy_above:p.entry,
-        orig_sl:p.origSl||undefined, orig_tgt:p.origTgt||undefined,
+        ticker:d.ticker, setup_type:d.setup_type, buy_above:p.entry/factor,
+        orig_sl:p.origSl?p.origSl/factor:undefined, orig_tgt:p.origTgt?p.origTgt/factor:undefined,
         call_timestamp:p.callTimestamp||new Date(p.entryDate).toISOString(),
         vol_annualized:d.vol_annualized,
-        vol_combinations:combosToApiShape(d.combos)
+        vol_combinations:combosToApiShape(d.combos).map(c=>({...c,stop:c.stop!=null?c.stop/factor:null,target:c.target!=null?c.target/factor:null}))
       });
       success++;
     }catch(e){fail++;}
   }
   await refreshAll();
-  toast(`${success} logged${fail?', '+fail+' failed':''}`,success>0?'ok':'err');
+  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${fail?', '+fail+' failed':''}`,success>0?'ok':'err');
   btn.disabled=false; btn.innerHTML='↓ Log all trades';
   document.getElementById('parsed-list').innerHTML='';
   document.getElementById('btn-log-all').style.display='none';
