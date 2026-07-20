@@ -35,9 +35,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .seg{display:flex}
 .seg button{flex:1;padding:7px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .15s}
 .seg button:first-child{border-radius:6px 0 0 6px}
-.seg button:last-child{border-radius:0 6px 6px 0;border-left:none}
+.seg button:last-child{border-radius:0 6px 6px 0}
+.seg button:not(:first-child){border-left:none}
 .seg button.on-mom{background:#1c3a2e;border-color:var(--green);color:var(--green)}
 .seg button.on-rev{background:#2d1f3a;border-color:var(--accent2);color:var(--accent2)}
+.seg button.on-pull{background:#3d2f0a;border-color:var(--amber);color:var(--amber)}
 .mode-tabs{display:flex;gap:6px;margin-bottom:4px}
 .mode-tab{flex:1;padding:7px;font-family:var(--mono);font-size:11px;border-radius:6px;border:1px solid var(--border2);background:var(--s2);color:var(--muted);cursor:pointer;text-align:center;transition:all .15s}
 .mode-tab.active{background:#1a2e3d;border-color:var(--accent);color:var(--accent)}
@@ -59,6 +61,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .badge{font-size:10px;padding:2px 6px;border-radius:3px;font-family:var(--mono)}
 .badge-mom{background:#1c3a2e;color:var(--green)}
 .badge-rev{background:#2d1f3a;color:var(--accent2)}
+.badge-pull{background:#3d2f0a;color:var(--amber)}
 .history-note{font-size:10px;font-family:var(--mono);color:var(--amber);background:#2e2514;border:1px solid #3d2f0a;border-radius:4px;padding:5px 8px;display:none}
 .history-note.show{display:block}
 .vol-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
@@ -172,6 +175,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <div class="seg">
         <button id="b-mom" onclick="setSeg('MOMENTUM')">Momentum</button>
         <button id="b-rev" onclick="setSeg('REVERSAL')">Reversal</button>
+        <button id="b-pull" onclick="setSeg('PULLBACK')">Pullback</button>
       </div>
     </div>
     <button class="btn-main" id="btn-compute" onclick="compute()">Compute stops &amp; targets</button>
@@ -305,6 +309,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
         <select id="e-setup">
           <option value="MOMENTUM">Momentum</option>
           <option value="REVERSAL">Reversal</option>
+          <option value="PULLBACK">Pullback</option>
         </select>
       </div>
     </div>
@@ -347,6 +352,16 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 
 <script>
 const LBS=[20,60,252], KS=[1,1.5,2,2.5,3,4,5];
+// Single source of truth for setup types. Each has a CSS suffix (used for
+// both .badge-X and .seg button.on-X) and a short label for the Analysis
+// tab's per-setup columns/grids.
+const SETUP_TYPES={
+  MOMENTUM:{cls:'mom',short:'MOM'},
+  REVERSAL:{cls:'rev',short:'REV'},
+  PULLBACK:{cls:'pull',short:'PULL'}
+};
+function setupCls(setupType){ return SETUP_TYPES[setupType]?.cls||'rev'; }
+function setupShort(setupType){ return SETUP_TYPES[setupType]?.short||setupType||'—'; }
 let setup='MOMENTUM';
 let parsedTrades=[]; // items pending review before "Log all trades" — from paste OR from TG fetch
 let ALL_TRADES=[];   // local cache of what the server returned, refreshed on load and after every mutation
@@ -634,6 +649,7 @@ function setSeg(val){
   setup=val;
   document.getElementById('b-mom').className=val==='MOMENTUM'?'on-mom':'';
   document.getElementById('b-rev').className=val==='REVERSAL'?'on-rev':'';
+  document.getElementById('b-pull').className=val==='PULLBACK'?'on-pull':'';
 }
 function swTab(name,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -670,7 +686,7 @@ function renderResult(d){
   document.getElementById('res-tkr').textContent=d.ticker;
   document.getElementById('res-ep').textContent='@ ₹'+fmt(d.entry_price);
   const b=document.getElementById('res-badge');
-  b.textContent=d.setup_type; b.className='badge badge-'+(d.setup_type==='MOMENTUM'?'mom':'rev');
+  b.textContent=d.setup_type; b.className='badge badge-'+setupCls(d.setup_type);
   const note=document.getElementById('history-note');
   const notes=[];
   if(d.history_days<252){
@@ -755,12 +771,12 @@ function parsePaste(){
   const hasWaHeaders=WA_HEADER_RE.test(text);
   const blocks=hasWaHeaders
     ? text.split(/(?=\[\d{2}\/\d{2}\/\d{2},\s*\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M\])/i).filter(b=>b.trim())
-    : text.split(/(?=#(?:POSITIONAL|REVERSAL|MOMENTUM))/i).filter(b=>b.trim());
+    : text.split(/(?=#(?:POSITIONAL|REVERSAL|MOMENTUM|PULLBACK))/i).filter(b=>b.trim());
 
   parsedTrades=[];
   document.getElementById('parsed-list').innerHTML='';
   blocks.forEach((block)=>{
-    const tagMatch=block.match(/#(POSITIONAL|REVERSAL|MOMENTUM)/i);
+    const tagMatch=block.match(/#(POSITIONAL|REVERSAL|MOMENTUM|PULLBACK)/i);
     if(!tagMatch) return; // stray text / non-trade chat lines
 
     let entryDate=new Date().toISOString().split('T')[0];
@@ -776,11 +792,12 @@ function parsePaste(){
       if(dateMatch) entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
     }
 
-    // setup type: #REVERSAL or #MOMENTUM if present anywhere in the block;
-    // if only #POSITIONAL, leave blank rather than guess.
+    // setup type: #REVERSAL, #MOMENTUM, or #PULLBACK if present anywhere in
+    // the block; if only #POSITIONAL, leave blank rather than guess.
     let setupType=null;
     if(/#REVERSAL/i.test(block)) setupType='REVERSAL';
     else if(/#MOMENTUM/i.test(block)) setupType='MOMENTUM';
+    else if(/#PULLBACK/i.test(block)) setupType='PULLBACK';
 
     // Ticker = first non-empty line AFTER the tag, regardless of whether the
     // tag sits on its own line or trails a sender/timestamp line — fixes the
@@ -886,6 +903,7 @@ function addParsedItem(p){
     <div class="field"><label>SETUP</label><div class="seg">
       <button id="ps-mom-${uid}" onclick="setParsedSetup('${uid}','MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
       <button id="ps-rev-${uid}" onclick="setParsedSetup('${uid}','REVERSAL')" class="${p.setup==='REVERSAL'?'on-rev':''}">Reversal</button>
+      <button id="ps-pull-${uid}" onclick="setParsedSetup('${uid}','PULLBACK')" class="${p.setup==='PULLBACK'?'on-pull':''}">Pullback</button>
     </div></div>`;
   document.getElementById('parsed-list').appendChild(el);
   updateLogAllButton();
@@ -913,15 +931,20 @@ function setParsedSetup(uid,val){
   item.setup=val;
   document.getElementById(`ps-mom-${uid}`).className=val==='MOMENTUM'?'on-mom':'';
   document.getElementById(`ps-rev-${uid}`).className=val==='REVERSAL'?'on-rev':'';
+  document.getElementById(`ps-pull-${uid}`).className=val==='PULLBACK'?'on-pull':'';
 }
 
 async function logAllParsed(){
   if(!parsedTrades.length) return;
   const btn=document.getElementById('btn-log-all');
-  btn.disabled=true; btn.innerHTML='<span class="spin"></span>Fetching vol data…';
+  btn.disabled=true;
   let success=0,fail=0,splitAdjusted=0;
+  const failures=[]; // {ticker, error} -- so a batch failure is diagnosable, not just a count
   const today=new Date().toISOString().split('T')[0];
-  for(const p of parsedTrades){
+  const total=parsedTrades.length;
+  for(let i=0;i<total;i++){
+    const p=parsedTrades[i];
+    btn.innerHTML=`<span class="spin"></span>Logging ${i+1}/${total}…`;
     try{
       const d=await computeVol(p.ticker,p.entry,p.setup,p.entryDate);
       // If the call date is in the past, check whether a real split happened
@@ -940,10 +963,22 @@ async function logAllParsed(){
         vol_combinations:combosToApiShape(d.combos).map(c=>({...c,stop:c.stop!=null?c.stop/factor:null,target:c.target!=null?c.target/factor:null}))
       });
       success++;
-    }catch(e){fail++;}
+    }catch(e){
+      fail++;
+      failures.push({ticker:p.ticker, error:e.message});
+    }
+    // Small pacing delay between requests -- logging a large batch fires many
+    // sequential price-history + split-check calls through the Worker's
+    // Yahoo proxy, and hitting that rapidly with zero delay is a plausible
+    // way to trigger rate limiting (Yahoo is known to be less tolerant of
+    // rapid-fire requests from a datacenter IP than a browser).
+    await new Promise(r=>setTimeout(r,200));
   }
   await refreshAll();
-  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${fail?', '+fail+' failed':''}`,success>0?'ok':'err');
+  if(failures.length){
+    console.warn(`logAllParsed: ${failures.length} trade(s) failed —`, failures);
+  }
+  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${fail?', '+fail+' failed (see console for details)':''}`,success>0?'ok':'err');
   btn.disabled=false; btn.innerHTML='↓ Log all trades';
   document.getElementById('parsed-list').innerHTML='';
   document.getElementById('btn-log-all').style.display='none';
@@ -1001,7 +1036,7 @@ function renderTrades(){
     <td class="c-open">${t.ticker}</td>
     <td>${t.entry_date||t.call_timestamp?.slice(0,10)||'—'}</td>
     <td>₹${fmt(t.entry_price??t.buy_above)}</td>
-    <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
+    <td><span class="badge badge-${setupCls(t.setup_type)}">${t.setup_type}</span></td>
     <td class="orig-sl">${t.orig_sl!=null?'₹'+fmt(t.orig_sl):'—'}</td>
     <td class="orig-tgt">${t.orig_tgt!=null?'₹'+fmt(t.orig_tgt):'—'}</td>
     <td class="fv-val">${fv20k2?'₹'+fmt(fv20k2.stop):'—'}</td>
@@ -1032,7 +1067,7 @@ function renderTrades(){
       <td class="${cls}">${lr!=null?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
       ${outcomeCell(t.orig_sl!=null?t.close_reason:null)}
       ${outcomeCell(fv20k2?.close_reason)}
-      <td><span class="badge badge-${t.setup_type==='MOMENTUM'?'mom':'rev'}">${t.setup_type}</span></td>
+      <td><span class="badge badge-${setupCls(t.setup_type)}">${t.setup_type}</span></td>
       <td style="font-size:10px;color:var(--muted)">${t.close_reason||'—'}</td>
       <td>
         <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
@@ -1135,26 +1170,27 @@ function switchAnalysisView(v){
 // 2a: combination heatmap, now with AVG DAYS (WIN)/(LOSS) columns.
 function renderCombosView(data){
   function buildRow(label,rows,isOrig){
-    const all=statsFor(rows), mom=statsFor(rows.filter(r=>r.setup==='MOMENTUM')), rev=statsFor(rows.filter(r=>r.setup==='REVERSAL'));
-    return`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">
+    const all=statsFor(rows);
+    let cells=`
       <td style="font-family:var(--mono);font-size:11px">${label}</td>
       <td style="font-family:var(--mono);font-size:11px;color:${colorWr(all.wr)}">${all.wr}</td>
       <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
       <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
-      <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(mom.wr)}">${mom.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(mom.avgRet)}">${mom.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(rev.wr)}">${rev.wr}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(rev.avgRet)}">${rev.avgRet}</td>
-    </tr>`;
+      <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>`;
+    Object.keys(SETUP_TYPES).forEach(st=>{
+      const s=statsFor(rows.filter(r=>r.setup===st));
+      cells+=`
+      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(s.wr)}">${s.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRet)}">${s.avgRet}</td>`;
+    });
+    return`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">${cells}</tr>`;
   }
   let html=`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
     <th>COMBINATION</th>
     <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
     <th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
-    <th>MOM — WIN%</th><th>MOM — AVG RET</th>
-    <th>REV — WIN%</th><th>REV — AVG RET</th>
+    ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — WIN%</th><th>${s.short} — AVG RET</th>`).join('')}
   </tr></thead><tbody>`;
   html+=buildRow('Original SL/TGT',data.origRows,true);
   data.combos.forEach(c=>{html+=buildRow(c.label,c.rows,false);});
@@ -1205,25 +1241,28 @@ function renderInteractionView(data){
     const groups={};
     data.combos.forEach(c=>{
       const key=groupKeyFn(c);
-      if(!groups[key]) groups[key]={MOMENTUM:[],REVERSAL:[]};
-      groups[key].MOMENTUM.push(...c.rows.filter(r=>r.setup==='MOMENTUM'));
-      groups[key].REVERSAL.push(...c.rows.filter(r=>r.setup==='REVERSAL'));
+      if(!groups[key]){
+        groups[key]={};
+        Object.keys(SETUP_TYPES).forEach(st=>{groups[key][st]=[];});
+      }
+      Object.keys(SETUP_TYPES).forEach(st=>{
+        groups[key][st].push(...c.rows.filter(r=>r.setup===st));
+      });
     });
     let html=`<div class="grid-title">${title}</div><div style="overflow-x:auto"><table class="tbl"><thead><tr>
-      <th>VALUE</th><th>MOM — WIN%</th><th>MOM — AVG RET</th><th>MOM — N</th>
-      <th>REV — WIN%</th><th>REV — AVG RET</th><th>REV — N</th>
+      <th>VALUE</th>
+      ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — WIN%</th><th>${s.short} — AVG RET</th><th>${s.short} — N</th>`).join('')}
     </tr></thead><tbody>`;
     groupLabels.forEach(g=>{
-      const mom=statsFor(groups[g]?.MOMENTUM||[]), rev=statsFor(groups[g]?.REVERSAL||[]);
-      html+=`<tr>
-        <td style="font-family:var(--mono);font-size:11px">${g}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:${colorWr(mom.wr)}">${mom.wr}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(mom.avgRet)}">${mom.avgRet}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${mom.n}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:${colorWr(rev.wr)}">${rev.wr}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(rev.avgRet)}">${rev.avgRet}</td>
-        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${rev.n}</td>
-      </tr>`;
+      let cells=`<td style="font-family:var(--mono);font-size:11px">${g}</td>`;
+      Object.keys(SETUP_TYPES).forEach(st=>{
+        const s=statsFor(groups[g]?.[st]||[]);
+        cells+=`
+        <td style="font-family:var(--mono);font-size:11px;color:${colorWr(s.wr)}">${s.wr}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRet)}">${s.avgRet}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.n}</td>`;
+      });
+      html+=`<tr>${cells}</tr>`;
     });
     html+='</tbody></table></div>';
     return html;
@@ -1232,7 +1271,7 @@ function renderInteractionView(data){
   out+=gridFor('k × setup', c=>String(c.k), KS.map(String));
   out+=gridFor('Vol type × setup', c=>c.vt==='full'?'Full Vol':'Downside Vol', ['Full Vol','Downside Vol']);
   out+=gridFor('Lookback × setup', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
-  out+=`<div class="placeholder-note">Duration × setup (e.g. "does k=2 resolve faster on momentum vs. reversal trades") isn't shown yet — it needs the AVG DAYS figures in the Combinations view to build up across enough closed trades first. Once there's a reasonable sample per cell, this becomes a fourth grid here.</div>`;
+  out+=`<div class="placeholder-note">Duration × setup (e.g. "does k=2 resolve faster on momentum vs. reversal vs. pullback trades") isn't shown yet — it needs the AVG DAYS figures in the Combinations view to build up across enough closed trades first. Once there's a reasonable sample per cell, this becomes a fourth grid here.</div>`;
   return out;
 }
 
@@ -1242,7 +1281,7 @@ function exportAnalysis(){
   const rowsAll=[{label:'Original SL/TGT',rows:data.origRows},...data.combos.map(c=>({label:c.label,rows:c.rows}))];
   const headers=['Combination','Setup','N','Wins','Win%','Avg Log Return%','Avg Days (Win)','Avg Days (Loss)'];
   const out=[headers.join(',')];
-  ['ALL','MOMENTUM','REVERSAL'].forEach(st=>{
+  ['ALL',...Object.keys(SETUP_TYPES)].forEach(st=>{
     rowsAll.forEach(r=>{
       const rows=st==='ALL'?r.rows:r.rows.filter(x=>x.setup===st);
       if(!rows.length) return;
