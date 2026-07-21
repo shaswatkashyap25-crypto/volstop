@@ -20,11 +20,12 @@ CHANNEL_ID  = int(os.environ.get('TG_CHANNEL_ID', '-1002940195231'))
 OUTPUT_FILE = 'tg_trades.csv'
 STATE_FILE  = 'tg_scraper_state.json'
 
-# A message is a trade if it carries ANY of these tags. #REVERSAL and
-# #MOMENTUM also tell us the setup type directly — no more guessing/manual
-# tagging later. If only #POSITIONAL appears with neither, setup_type comes
-# back blank rather than a guessed default, since we don't actually know it.
-TAG_PATTERN = re.compile(r'#(POSITIONAL|REVERSAL|MOMENTUM)', re.IGNORECASE)
+# A message is a trade if it carries ANY of these tags. #REVERSAL, #MOMENTUM,
+# and #PULLBACK also tell us the setup type directly — no more guessing/manual
+# tagging later. If only #POSITIONAL appears with none of the other three,
+# setup_type comes back blank rather than a guessed default, since we don't
+# actually know it.
+TAG_PATTERN = re.compile(r'#(POSITIONAL|REVERSAL|MOMENTUM|PULLBACK)', re.IGNORECASE)
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -45,6 +46,8 @@ def parse_trade(text, date, msg_id):
         setup_type = 'REVERSAL'
     elif 'MOMENTUM' in tags_found:
         setup_type = 'MOMENTUM'
+    elif 'PULLBACK' in tags_found:
+        setup_type = 'PULLBACK'
     else:
         setup_type = ''  # only #POSITIONAL seen — genuinely unknown, left blank on purpose
 
@@ -62,16 +65,20 @@ def parse_trade(text, date, msg_id):
     if not ticker:
         return None
 
-    def extract_price(pattern, text):
-        m = re.search(pattern, text, re.IGNORECASE)
+    def extract_price(pattern, text, extra_flags=0):
+        m = re.search(pattern, text, re.IGNORECASE | extra_flags)
         if m:
             try: return float(re.sub(r'[^0-9.]', '', m.group(1)))
             except: return None
         return None
 
     buy_above = extract_price(r'BUY\s*ABOVE\s*:?\s*([\d,\.]+)', text)
-    sl        = extract_price(r'^SL\s*:?\s*([\d,\.]+)', text)
-    tgt       = extract_price(r'^TGT\s*:?\s*([\d,\.]+)', text)
+    # ^ without re.MULTILINE only matches the very start of the whole
+    # message -- since every real message starts with the tag/ticker/buy
+    # above lines first, this silently never matched at all, leaving
+    # orig_sl/orig_tgt permanently blank in the CSV output.
+    sl        = extract_price(r'^SL\s*:?\s*([\d,\.]+)', text, re.MULTILINE)
+    tgt       = extract_price(r'^TGT\s*:?\s*([\d,\.]+)', text, re.MULTILINE)
 
     if not buy_above:
         return None
