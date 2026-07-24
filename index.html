@@ -113,6 +113,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .status-pending{color:var(--muted)}
 .status-open{color:var(--amber)}
 .replay-err-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#3d1414;color:var(--red);margin-left:4px;cursor:help}
+.replay-progress-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#0f2942;color:var(--accent);margin-left:4px;cursor:help}
 .empty{text-align:center;padding:48px;color:var(--muted);font-family:var(--mono);font-size:12px}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;align-items:center;justify-content:center}
 .modal-overlay.show{display:flex}
@@ -677,6 +678,19 @@ async function compute(){
 function escapeAttr(s){
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+// Distinguishes "still catching up, needs another Recheck or two" (harmless,
+// expected for older trades under the request-budget cap) from an actual
+// hard failure (invalid symbol, rate limit, etc.) -- both used to render as
+// an identical red "replay failed" badge, which made a trade that's simply
+// mid-sync look just as alarming as one that's genuinely broken.
+function replayBadge(replayError){
+  if(!replayError) return '';
+  const partialMatch=replayError.match(/^Partially synced up to (\S+)/);
+  if(partialMatch){
+    return ` <span class="replay-progress-badge" title="${escapeAttr(replayError)}">🔄 synced to ${partialMatch[1]}</span>`;
+  }
+  return ` <span class="replay-err-badge" title="${escapeAttr(replayError)}">⚠ replay failed</span>`;
+}
 function fmt(v,dec=2){
   if(v===undefined||v===null||v==='') return '—';
   return parseFloat(v).toLocaleString('en-IN',{minimumFractionDigits:dec});
@@ -806,7 +820,7 @@ function parsePaste(){
     const afterTag=block.slice(tagMatch.index+tagMatch[0].length);
     const bodyLines=afterTag.split(/\n/).map(l=>l.trim()).filter(Boolean);
     const ticker=bodyLines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
-    const buyLine=bodyLines.find(l=>/BUY ABOVE/i.test(l));
+    const buyLine=bodyLines.find(l=>/BUY\s*(?:ABOVE|AT)/i.test(l));
     const slLine=bodyLines.find(l=>/^SL:/i.test(l));
     const tgtLine=bodyLines.find(l=>/^TGT:/i.test(l));
     if(!ticker||!buyLine) return;
@@ -1103,7 +1117,7 @@ function renderTrades(){
     <td class="tgt-val">${dv20k2?'₹'+fmt(dv20k2.target):'—'}</td>
     <td class="fv-val">${fvAnn??'—'}%</td>
     <td class="dv-val">${dvAnn??'—'}%</td>
-    <td class="status-${t.state.toLowerCase()}">${t.state}${t.replay_error?` <span class="replay-err-badge" title="${escapeAttr(t.replay_error)}">⚠ replay failed</span>`:''}</td>
+    <td class="status-${t.state.toLowerCase()}">${t.state}${replayBadge(t.replay_error)}</td>
     <td>
       <button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>
       <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
