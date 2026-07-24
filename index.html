@@ -860,7 +860,7 @@ async function fetchTGTrades(){
     // not entry_date -- entry_date only gets set once a trade actually
     // triggers, so comparing it against the CSV's message-date would falsely
     // treat an already-triggered trade as new and re-import a duplicate.
-    const existingKeys=new Set(ALL_TRADES.map(t=>`${t.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase()}_${t.call_timestamp?.slice(0,10)}`));
+    const existingKeys=new Set(ALL_TRADES.map(t=>tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10))));
     // Also exclude anything explicitly dismissed -- same ticker+date key
     // format, so a dismissal only blocks that specific past recommendation,
     // not a genuinely new call on the same ticker later.
@@ -869,7 +869,7 @@ async function fetchTGTrades(){
     let added=0, skippedDismissed=0;
     for(const row of rows){
       if(!row.ticker||!row.entry_price) continue;
-      const key=`${row.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase()}_${row.entry_date}`;
+      const key=tradeDedupeKey(row.ticker,row.entry_date);
       if(existingKeys.has(key)) continue;
       if(dismissedKeys.has(key)){ skippedDismissed++; continue; }
       addParsedItem({
@@ -934,17 +934,40 @@ function setParsedSetup(uid,val){
   document.getElementById(`ps-pull-${uid}`).className=val==='PULLBACK'?'on-pull':'';
 }
 
+// Shared dedupe key format: ticker (suffix-stripped, uppercased) + message
+// date. Used both by the TG-fetch dedupe check and by logAllParsed's final
+// safety check, so a trade is recognized as "the same trade" identically
+// regardless of which entry point it came through.
+function tradeDedupeKey(ticker,dateStr){
+  return `${(ticker||'').replace(/\.(NS|BO)$/i,'').toUpperCase()}_${dateStr||''}`;
+}
+
 async function logAllParsed(){
   if(!parsedTrades.length) return;
   const btn=document.getElementById('btn-log-all');
   btn.disabled=true;
-  let success=0,fail=0,splitAdjusted=0;
+  let success=0,fail=0,splitAdjusted=0,skippedDup=0;
   const failures=[]; // {ticker, error} -- so a batch failure is diagnosable, not just a count
   const today=new Date().toISOString().split('T')[0];
   const total=parsedTrades.length;
+  // Final safety net against duplicates, regardless of how a candidate got
+  // into this review list -- the manual paste flow has no dedup of its own
+  // (unlike TG fetch), so without this, pasting the same message twice (or
+  // pasting something already logged via another path) silently creates a
+  // duplicate trade. Fetched once here rather than per-trade to avoid
+  // adding yet another network call per iteration on top of the pacing
+  // already in place; updated as we go so duplicates WITHIN this same batch
+  // are also caught, not just duplicates of already-existing trades.
+  const existing=await apiGetTrades().catch(()=>[]);
+  const existingKeys=new Set(existing.map(t=>tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10))));
   for(let i=0;i<total;i++){
     const p=parsedTrades[i];
     btn.innerHTML=`<span class="spin"></span>Logging ${i+1}/${total}…`;
+    const key=tradeDedupeKey(p.ticker,p.entryDate);
+    if(existingKeys.has(key)){
+      skippedDup++;
+      continue;
+    }
     try{
       const d=await computeVol(p.ticker,p.entry,p.setup,p.entryDate);
       // If the call date is in the past, check whether a real split happened
@@ -962,6 +985,7 @@ async function logAllParsed(){
         vol_annualized:d.vol_annualized,
         vol_combinations:combosToApiShape(d.combos).map(c=>({...c,stop:c.stop!=null?c.stop/factor:null,target:c.target!=null?c.target/factor:null}))
       });
+      existingKeys.add(key); // so a second identical entry later in this SAME batch is also caught
       success++;
     }catch(e){
       fail++;
@@ -978,7 +1002,7 @@ async function logAllParsed(){
   if(failures.length){
     console.warn(`logAllParsed: ${failures.length} trade(s) failed —`, failures);
   }
-  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${fail?', '+fail+' failed (see console for details)':''}`,success>0?'ok':'err');
+  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate${skippedDup>1?'s':''} skipped`:''}${fail?', '+fail+' failed (see console for details)':''}`,success>0?'ok':(skippedDup&&!fail?'ok':'err'));
   btn.disabled=false; btn.innerHTML='↓ Log all trades';
   document.getElementById('parsed-list').innerHTML='';
   document.getElementById('btn-log-all').style.display='none';
