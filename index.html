@@ -897,7 +897,8 @@ function addParsedItem(p){
   el.className='parsed-item';
   el.id=`parsed-${uid}`;
   el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span>
-      <button class="btn-del-tr" style="margin-left:auto" onclick="removeParsedItem('${uid}')" title="Remove from this batch">✕</button></div>
+      <button class="exp-btn" style="margin-left:auto;padding:3px 8px;font-size:10px" onclick="dismissParsedItem('${uid}')" title="Remove from this batch AND stop suggesting it in future fetches">Dismiss</button>
+      <button class="btn-del-tr" onclick="removeParsedItem('${uid}')" title="Remove from this batch only">✕</button></div>
     <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}${p.callTimestamp?' '+new Date(p.callTimestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Kolkata'})+' IST':''}</div>
     ${!p.setup?'<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px">No setup tag found — pick one below</div>':''}
     <div class="field"><label>SETUP</label><div class="seg">
@@ -915,6 +916,17 @@ function removeParsedItem(uid){
   parsedTrades.splice(idx,1);
   document.getElementById('parsed-'+uid)?.remove();
   updateLogAllButton();
+}
+
+async function dismissParsedItem(uid){
+  const item=parsedTrades.find(x=>x.uid===uid);
+  if(!item) return;
+  try{
+    const key=item.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase();
+    await apiAddDismissed(key,item.entryDate);
+    removeParsedItem(uid);
+    toast(`${item.ticker} dismissed — won't be suggested again`,'ok');
+  }catch(e){toast(e.message,'err');}
 }
 
 function updateLogAllButton(){
@@ -945,11 +957,26 @@ function tradeDedupeKey(ticker,dateStr){
 async function logAllParsed(){
   if(!parsedTrades.length) return;
   const btn=document.getElementById('btn-log-all');
+
+  // Only attempt items that already have a setup tag -- an untagged item is
+  // guaranteed to fail the Worker's required-field validation (setup_type),
+  // so attempting it anyway just burns the pacing delay and a network round
+  // trip for a doomed request. Untagged items are left untouched in the
+  // list, ready to log the moment they're tagged and "Log all" is clicked
+  // again -- this is what makes "tag a few, log, repeat" fast instead of
+  // re-attempting 100+ untagged trades on every single click.
+  const ready=parsedTrades.filter(p=>p.setup);
+  const notReady=parsedTrades.length-ready.length;
+  if(!ready.length){
+    toast(notReady?`${notReady} trade${notReady>1?'s':''} still need a setup tag before logging`:'Nothing to log','err');
+    return;
+  }
+
   btn.disabled=true;
   let success=0,fail=0,splitAdjusted=0,skippedDup=0;
   const failures=[]; // {ticker, error} -- so a batch failure is diagnosable, not just a count
   const today=new Date().toISOString().split('T')[0];
-  const total=parsedTrades.length;
+  const total=ready.length;
   // Final safety net against duplicates, regardless of how a candidate got
   // into this review list -- the manual paste flow has no dedup of its own
   // (unlike TG fetch), so without this, pasting the same message twice (or
@@ -957,15 +984,21 @@ async function logAllParsed(){
   // duplicate trade. Fetched once here rather than per-trade to avoid
   // adding yet another network call per iteration on top of the pacing
   // already in place; updated as we go so duplicates WITHIN this same batch
-  // are also caught, not just duplicates of already-existing trades.
+  // are also caught, not just duplicates of already-existing trades. Also
+  // checks the dismissed list -- previously only existing trades were
+  // checked, so a manually-pasted message for an already-dismissed
+  // ticker+date could slip through uncaught.
   const existing=await apiGetTrades().catch(()=>[]);
   const existingKeys=new Set(existing.map(t=>tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10))));
+  const dismissedForLog=await apiGetDismissed().catch(()=>[]);
+  const dismissedKeysForLog=new Set(dismissedForLog.map(d=>d.key));
   for(let i=0;i<total;i++){
-    const p=parsedTrades[i];
+    const p=ready[i];
     btn.innerHTML=`<span class="spin"></span>Logging ${i+1}/${total}…`;
     const key=tradeDedupeKey(p.ticker,p.entryDate);
-    if(existingKeys.has(key)){
+    if(existingKeys.has(key)||dismissedKeysForLog.has(key)){
       skippedDup++;
+      removeParsedItem(p.uid);
       continue;
     }
     try{
@@ -987,6 +1020,7 @@ async function logAllParsed(){
       });
       existingKeys.add(key); // so a second identical entry later in this SAME batch is also caught
       success++;
+      removeParsedItem(p.uid); // only remove on success -- failures stay in the list for an easy retry
     }catch(e){
       fail++;
       failures.push({ticker:p.ticker, error:e.message});
@@ -1002,12 +1036,12 @@ async function logAllParsed(){
   if(failures.length){
     console.warn(`logAllParsed: ${failures.length} trade(s) failed —`, failures);
   }
-  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate${skippedDup>1?'s':''} skipped`:''}${fail?', '+fail+' failed (see console for details)':''}`,success>0?'ok':(skippedDup&&!fail?'ok':'err'));
-  btn.disabled=false; btn.innerHTML='↓ Log all trades';
-  document.getElementById('parsed-list').innerHTML='';
-  document.getElementById('btn-log-all').style.display='none';
-  document.getElementById('paste-input').value='';
-  parsedTrades=[];
+  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate/dismissed skipped`:''}${fail?', '+fail+' failed (see console, left in list to retry)':''}${notReady?`, ${notReady} still need a tag`:''}`,success>0?'ok':(skippedDup&&!fail?'ok':'err'));
+  btn.disabled=false;
+  updateLogAllButton();
+  if(!parsedTrades.length){
+    document.getElementById('paste-input').value='';
+  }
 }
 
 // ── Manual split/bonus adjustment (button-triggered, not automatic) ──
