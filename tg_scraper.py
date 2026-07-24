@@ -72,7 +72,11 @@ def parse_trade(text, date, msg_id):
             except: return None
         return None
 
-    buy_above = extract_price(r'BUY\s*ABOVE\s*:?\s*([\d,\.]+)', text)
+    # Some calls use "BUY AT" instead of "BUY ABOVE" -- both are recognized
+    # here, since only matching ABOVE silently dropped every AT-phrased
+    # message entirely (buy_above came back None -> parse_trade() returns
+    # None before anything gets written to the CSV).
+    buy_above = extract_price(r'BUY\s*(?:ABOVE|AT)\s*:?\s*([\d,\.]+)', text)
     # ^ without re.MULTILINE only matches the very start of the whole
     # message -- since every real message starts with the tag/ticker/buy
     # above lines first, this silently never matched at all, leaving
