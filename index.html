@@ -51,6 +51,9 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .parsed-item{background:var(--s2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px}
 .parsed-item-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .parsed-ticker{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent)}
+.parsed-ticker-input{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent);background:transparent;border:1px solid transparent;border-radius:4px;padding:2px 4px;width:150px}
+.parsed-ticker-input:hover{border-color:var(--border2)}
+.parsed-ticker-input:focus{border-color:var(--accent);outline:none;background:var(--bg)}
 .parsed-price{font-family:var(--mono);font-size:11px;color:var(--muted)}
 .parsed-orig{font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:6px}
 .res-box{background:var(--s2);border:1px solid var(--border2);border-radius:10px;padding:14px;display:none;flex-direction:column;gap:10px}
@@ -402,6 +405,31 @@ async function yahooFetch(url){
       if(!r.ok) continue;
       const j=await r.json();
       if(j?.chart?.result) return j;
+    }catch(e){}
+  }
+  return null;
+}
+
+// Resolves a company name (or malformed ticker) to its actual NSE trading
+// symbol via Yahoo's own symbol search -- e.g. "ASHOKLEYLAND" -> "ASHOKLEY".
+// Deliberately NOT a hardcoded lookup table: NSE symbols aren't always the
+// obvious abbreviation, there are thousands of listings, and any static
+// table would need constant upkeep. Querying Yahoo's live search API defers
+// to an authoritative, self-updating source instead. Only used as a
+// SUGGESTION -- it pre-fills the editable ticker field for the person to
+// confirm, never silently substitutes, since a search match could plausibly
+// be a different (wrong) similarly-named company.
+async function resolveTickerViaYahoo(query){
+  const url=`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=5&newsCount=0`;
+  for(const target of [url, WORKER+'/?url='+encodeURIComponent(url)]){
+    try{
+      const r=await fetch(target);
+      if(!r.ok) continue;
+      const j=await r.json();
+      const quotes=j?.quotes||[];
+      // Yahoo represents NSE India as exchange code "NSI" in search results.
+      const nseMatch=quotes.find(q=>q.exchange==='NSI'&&q.quoteType==='EQUITY');
+      if(nseMatch) return nseMatch.symbol.replace(/\.NS$/i,'');
     }catch(e){}
   }
   return null;
@@ -910,7 +938,7 @@ function addParsedItem(p){
   const el=document.createElement('div');
   el.className='parsed-item';
   el.id=`parsed-${uid}`;
-  el.innerHTML=`<div class="parsed-item-head"><span class="parsed-ticker">${p.ticker}</span><span class="parsed-price">₹${p.entry}</span>
+  el.innerHTML=`<div class="parsed-item-head"><input class="parsed-ticker-input" value="${escapeAttr(p.ticker)}" oninput="updateParsedTicker('${uid}',this.value)" title="Edit if this doesn't match the actual NSE symbol"/><span class="parsed-price">₹${p.entry}</span>
       <button class="exp-btn" style="margin-left:auto;padding:3px 8px;font-size:10px" onclick="dismissParsedItem('${uid}')" title="Remove from this batch AND stop suggesting it in future fetches">Dismiss</button>
       <button class="btn-del-tr" onclick="removeParsedItem('${uid}')" title="Remove from this batch only">✕</button></div>
     <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}${p.callTimestamp?' '+new Date(p.callTimestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Kolkata'})+' IST':''}</div>
@@ -958,6 +986,12 @@ function setParsedSetup(uid,val){
   document.getElementById(`ps-mom-${uid}`).className=val==='MOMENTUM'?'on-mom':'';
   document.getElementById(`ps-rev-${uid}`).className=val==='REVERSAL'?'on-rev':'';
   document.getElementById(`ps-pull-${uid}`).className=val==='PULLBACK'?'on-pull':'';
+}
+
+function updateParsedTicker(uid,newValue){
+  const item=parsedTrades.find(x=>x.uid===uid);
+  if(!item) return;
+  item.ticker=newValue.trim().toUpperCase().replace(/[^A-Z0-9&]/g,'');
 }
 
 // Shared dedupe key format: ticker (suffix-stripped, uppercased) + message
@@ -1038,6 +1072,25 @@ async function logAllParsed(){
     }catch(e){
       fail++;
       failures.push({ticker:p.ticker, error:e.message});
+      // If this failed specifically because the ticker couldn't be found
+      // (not, say, a rate-limit error -- no point searching for those), try
+      // resolving it via Yahoo's symbol search and pre-fill the suggestion.
+      // Saves having to manually recognize/look up the real symbol for the
+      // common "full company name instead of ticker" case -- still requires
+      // confirming before the next retry, never silently substituted.
+      if(e.message.startsWith('No data for')){
+        const originalTicker=p.ticker;
+        const suggestion=await resolveTickerViaYahoo(originalTicker);
+        if(suggestion&&suggestion!==originalTicker){
+          p.ticker=suggestion;
+          const input=document.querySelector(`#parsed-${p.uid} .parsed-ticker-input`);
+          if(input){
+            input.value=suggestion;
+            input.style.borderColor='var(--amber)';
+            input.title=`Auto-suggested from "${originalTicker}" via Yahoo symbol search — please confirm before retrying`;
+          }
+        }
+      }
     }
     // Small pacing delay between requests -- logging a large batch fires many
     // sequential price-history + split-check calls through the Worker's
