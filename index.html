@@ -699,7 +699,19 @@ async function compute(){
   try{
     const d=await computeVol(ticker,entry,setup);
     cur=d; renderResult(d);
-  }catch(e){toast(e.message,'err');}
+  }catch(e){
+    if(e.message.startsWith('No data for')){
+      const suggestion=await resolveTickerViaYahoo(ticker);
+      if(suggestion&&suggestion!==ticker){
+        document.getElementById('inp-ticker').value=suggestion;
+        toast(`"${ticker}" not found — try "${suggestion}"? (auto-filled, click Compute again)`,'err');
+      }else{
+        toast(e.message,'err');
+      }
+    }else{
+      toast(e.message,'err');
+    }
+  }
   finally{btn.disabled=false; btn.innerHTML='Compute stops &amp; targets';}
 }
 
@@ -847,6 +859,7 @@ function parsePaste(){
     // headers were present.
     const afterTag=block.slice(tagMatch.index+tagMatch[0].length);
     const bodyLines=afterTag.split(/\n/).map(l=>l.trim()).filter(Boolean);
+    const rawTickerText=bodyLines[0];
     const ticker=bodyLines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
     const buyLine=bodyLines.find(l=>/BUY\s*(?:ABOVE|AT)/i.test(l));
     const slLine=bodyLines.find(l=>/^SL:/i.test(l));
@@ -856,7 +869,7 @@ function parsePaste(){
     const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
     const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
     if(!entry||isNaN(entry)) return;
-    addParsedItem({ticker,entry,origSl,origTgt,entryDate,callTimestamp,setup:setupType});
+    addParsedItem({ticker,rawTickerText,entry,origSl,origTgt,entryDate,callTimestamp,setup:setupType});
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
@@ -883,8 +896,17 @@ async function fetchTGTrades(){
       const messageText=rest.join(',');
       const slMatch=messageText.match(/SL:\s*([\d.]+)/i);
       const tgtMatch=messageText.match(/TGT:\s*([\d.]+)/i);
+      // The ticker column above is already space-stripped by the scraper
+      // (e.g. "VARROCENGINEERINGLTD"), which has no word boundaries left for
+      // a search API to tokenize. Pull the original spaced text -- whatever
+      // sits between the tag and "BUY" -- from the raw message instead.
+      const tagInMsg=messageText.match(/#(POSITIONAL|REVERSAL|MOMENTUM|PULLBACK)/i);
+      const afterTagInMsg=tagInMsg?messageText.slice(tagInMsg.index+tagInMsg[0].length):messageText;
+      const buyIdx=afterTagInMsg.search(/BUY\s*(?:ABOVE|AT)/i);
+      const rawTickerText=buyIdx>=0?afterTagInMsg.slice(0,buyIdx).trim():null;
       return{
         ticker:(ticker||'').trim().toUpperCase(),
+        rawTickerText,
         entry_price:parseFloat(priceStr),
         orig_sl:slMatch?parseFloat(slMatch[1]):null,
         orig_tgt:tgtMatch?parseFloat(tgtMatch[1]):null,
@@ -915,7 +937,7 @@ async function fetchTGTrades(){
       if(existingKeys.has(key)) continue;
       if(dismissedKeys.has(key)){ skippedDismissed++; continue; }
       addParsedItem({
-        ticker:row.ticker, entry:parseFloat(row.entry_price),
+        ticker:row.ticker, rawTickerText:row.rawTickerText, entry:parseFloat(row.entry_price),
         origSl:row.orig_sl?parseFloat(row.orig_sl):null,
         origTgt:row.orig_tgt?parseFloat(row.orig_tgt):null,
         entryDate:row.entry_date, setup:row.setup_type||null
@@ -1080,7 +1102,8 @@ async function logAllParsed(){
       // confirming before the next retry, never silently substituted.
       if(e.message.startsWith('No data for')){
         const originalTicker=p.ticker;
-        const suggestion=await resolveTickerViaYahoo(originalTicker);
+        const searchQuery=p.rawTickerText||originalTicker;
+        const suggestion=await resolveTickerViaYahoo(searchQuery);
         if(suggestion&&suggestion!==originalTicker){
           p.ticker=suggestion;
           const input=document.querySelector(`#parsed-${p.uid} .parsed-ticker-input`);
