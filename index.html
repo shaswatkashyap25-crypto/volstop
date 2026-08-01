@@ -117,6 +117,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .status-open{color:var(--amber)}
 .replay-err-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#3d1414;color:var(--red);margin-left:4px;cursor:help}
 .replay-progress-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#0f2942;color:var(--accent);margin-left:4px;cursor:help}
+.expiry-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#2a2a2a;color:var(--muted);margin-left:4px;cursor:help}
 .empty{text-align:center;padding:48px;color:var(--muted);font-family:var(--mono);font-size:12px}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;align-items:center;justify-content:center}
 .modal-overlay.show{display:flex}
@@ -234,6 +235,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('open')">Export CSV</button>
       <button class="exp-btn" onclick="checkSplits()">⟳ Check splits &amp; adjust</button>
+      <button class="exp-btn" style="border-color:var(--amber);color:var(--amber)" onclick="resyncCallTimes()">⏱ Resync call times</button>
       <button class="action-btn" onclick="refreshAll()">⟳ Refresh from server</button>
     </div>
     <div class="tbl-wrap">
@@ -731,6 +733,17 @@ function replayBadge(replayError){
   }
   return ` <span class="replay-err-badge" title="${escapeAttr(replayError)}">⚠ replay failed</span>`;
 }
+// Flags a PENDING trade whose stated holding period has elapsed without
+// ever triggering -- informational only, never auto-deletes anything, since
+// silently removing data the person hasn't reviewed is worse than a badge
+// they can act on (or ignore) themselves.
+function expiryBadge(t){
+  if(t.state!=='PENDING'||!t.holding_period_days||!t.call_timestamp) return '';
+  const callDate=new Date(t.call_timestamp);
+  const daysSince=Math.floor((Date.now()-callDate.getTime())/86400000);
+  if(daysSince<=t.holding_period_days) return '';
+  return ` <span class="expiry-badge" title="Never triggered within its ${t.holding_period_days}-day holding period (${daysSince} days since call)">⏰ expired</span>`;
+}
 function fmt(v,dec=2){
   if(v===undefined||v===null||v==='') return '—';
   return parseFloat(v).toLocaleString('en-IN',{minimumFractionDigits:dec});
@@ -811,6 +824,21 @@ function parseIstTimestamp(dd,mm,yy,hh,min,ss,ampm){
   return new Date(utcMs).toISOString();
 }
 
+// Builds a proper UTC call_timestamp from the CSV's date+time columns
+// (YYYY-MM-DD, HH:MM -- already IST after the tg_scraper.py fix). Without
+// this, TG-fetched trades always defaulted to midnight UTC regardless of
+// the real call time -- a strict superset of the correct post-call window,
+// meaning it could only ever cause FALSE triggers (pre-call price action
+// wrongly counted as happening after the call), never false negatives.
+function csvDateTimeToUtcISOString(dateStr,timeStr){
+  if(!dateStr||!timeStr) return null;
+  const[y,mo,d]=dateStr.split('-').map(Number);
+  const[hh,mm]=timeStr.split(':').map(Number);
+  if(!y||!mo||!d||isNaN(hh)||isNaN(mm)) return null;
+  const utcMs=Date.UTC(y,mo-1,d,hh,mm,0)-(5.5*60*60*1000);
+  return new Date(utcMs).toISOString();
+}
+
 function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
@@ -864,12 +892,13 @@ function parsePaste(){
     const buyLine=bodyLines.find(l=>/BUY\s*(?:ABOVE|AT)/i.test(l));
     const slLine=bodyLines.find(l=>/^SL:/i.test(l));
     const tgtLine=bodyLines.find(l=>/^TGT:/i.test(l));
+    const holdMatch=block.match(/Holding\s*Period\s*:?\s*(\d+)\s*Days?/i);
     if(!ticker||!buyLine) return;
     const entry=parseFloat(buyLine.replace(/[^0-9.]/g,''));
     const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
     const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
     if(!entry||isNaN(entry)) return;
-    addParsedItem({ticker,rawTickerText,entry,origSl,origTgt,entryDate,callTimestamp,setup:setupType});
+    addParsedItem({ticker,rawTickerText,entry,origSl,origTgt,entryDate,callTimestamp,holdingPeriodDays:holdMatch?parseInt(holdMatch[1],10):null,setup:setupType});
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
@@ -892,7 +921,7 @@ async function fetchTGTrades(){
     // parsePaste() already extracts them from a pasted WhatsApp message.
     const rows=lines.map(line=>{
       const parts=line.split(',');
-      const[,ticker,setupRaw,date,,priceStr,,,...rest]=parts;
+      const[,ticker,setupRaw,date,time,priceStr,,,...rest]=parts;
       const messageText=rest.join(',');
       const slMatch=messageText.match(/SL:\s*([\d.]+)/i);
       const tgtMatch=messageText.match(/TGT:\s*([\d.]+)/i);
@@ -904,6 +933,7 @@ async function fetchTGTrades(){
       const afterTagInMsg=tagInMsg?messageText.slice(tagInMsg.index+tagInMsg[0].length):messageText;
       const buyIdx=afterTagInMsg.search(/BUY\s*(?:ABOVE|AT)/i);
       const rawTickerText=buyIdx>=0?afterTagInMsg.slice(0,buyIdx).trim():null;
+      const holdMatch=messageText.match(/Holding\s*Period\s*:?\s*(\d+)\s*Days?/i);
       return{
         ticker:(ticker||'').trim().toUpperCase(),
         rawTickerText,
@@ -911,6 +941,8 @@ async function fetchTGTrades(){
         orig_sl:slMatch?parseFloat(slMatch[1]):null,
         orig_tgt:tgtMatch?parseFloat(tgtMatch[1]):null,
         entry_date:(date||'').trim(),
+        call_timestamp:csvDateTimeToUtcISOString((date||'').trim(),(time||'').trim()),
+        holding_period_days:holdMatch?parseInt(holdMatch[1],10):null,
         setup_type:(setupRaw||'').trim().toUpperCase()||null
       };
     });
@@ -940,7 +972,8 @@ async function fetchTGTrades(){
         ticker:row.ticker, rawTickerText:row.rawTickerText, entry:parseFloat(row.entry_price),
         origSl:row.orig_sl?parseFloat(row.orig_sl):null,
         origTgt:row.orig_tgt?parseFloat(row.orig_tgt):null,
-        entryDate:row.entry_date, setup:row.setup_type||null
+        entryDate:row.entry_date, callTimestamp:row.call_timestamp,
+        holdingPeriodDays:row.holding_period_days, setup:row.setup_type||null
       });
       added++;
     }
@@ -1085,6 +1118,7 @@ async function logAllParsed(){
         ticker:d.ticker, setup_type:d.setup_type, buy_above:p.entry/factor,
         orig_sl:p.origSl?p.origSl/factor:undefined, orig_tgt:p.origTgt?p.origTgt/factor:undefined,
         call_timestamp:p.callTimestamp||new Date(p.entryDate).toISOString(),
+        holding_period_days:p.holdingPeriodDays||undefined,
         vol_annualized:d.vol_annualized,
         vol_combinations:combosToApiShape(d.combos).map(c=>({...c,stop:c.stop!=null?c.stop/factor:null,target:c.target!=null?c.target/factor:null}))
       });
@@ -1162,6 +1196,72 @@ async function checkSplits(){
   toast(adjusted?`${adjusted} trade(s) split-adjusted`:'No splits found','ok');
 }
 
+// Finds every trade carrying the midnight-UTC signature left by the old
+// call_timestamp bug (TG-fetched trades always defaulted to midnight
+// regardless of the real call time), matches each against the current
+// (corrected) tg_trades.csv by ticker+date, and for genuine mismatches,
+// resets the trade to a clean PENDING state with the corrected timestamp
+// and re-sweeps it from scratch. A trade with no CSV match is left
+// untouched and reported separately rather than guessed at.
+async function resyncCallTimes(){
+  const allTrades=await apiGetTrades();
+  const affected=allTrades.filter(t=>t.call_timestamp&&t.call_timestamp.endsWith('T00:00:00.000Z'));
+  if(!affected.length){toast('No trades carry the midnight-UTC bug signature — nothing to resync','ok');return;}
+  if(!confirm(`${affected.length} trade(s) may have an incorrect call time from a past bug. This will re-verify each one against the current TG data and re-run its outcome from scratch where the time was wrong. This cannot be undone. Continue?`)) return;
+
+  const btn=event?.target;
+  if(btn){btn.disabled=true;}
+  toast('Fetching corrected TG data…','');
+  let correctedLookup;
+  try{
+    const csvUrl='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv?t='+Date.now();
+    const csvText=await (await fetch(csvUrl)).text();
+    const lines=csvText.trim().split('\n').filter(l=>l.trim());
+    correctedLookup=new Map();
+    for(const line of lines){
+      const parts=line.split(',');
+      const[,ticker,,date,time]=parts;
+      const ts=csvDateTimeToUtcISOString((date||'').trim(),(time||'').trim());
+      if(ts) correctedLookup.set(tradeDedupeKey(ticker,date),ts);
+    }
+  }catch(e){
+    toast('Could not fetch corrected TG data: '+e.message,'err');
+    if(btn) btn.disabled=false;
+    return;
+  }
+
+  let fixed=0,notFound=0,alreadyCorrect=0;
+  const notFoundTickers=[];
+  for(let i=0;i<affected.length;i++){
+    const t=affected[i];
+    if(btn) btn.textContent=`⏱ Resyncing ${i+1}/${affected.length}…`;
+    const key=tradeDedupeKey(t.ticker,t.entry_date||t.call_timestamp.slice(0,10));
+    const correctedTs=correctedLookup.get(key);
+    if(!correctedTs){ notFound++; notFoundTickers.push(t.ticker); continue; }
+    if(correctedTs===t.call_timestamp){ alreadyCorrect++; continue; }
+
+    const resetPatch={
+      call_timestamp:correctedTs,
+      state:'PENDING', entry_date:null, entry_time:null, entry_price:null,
+      close_reason:null, close_date:null, close_price:null,
+      auto_closed:false, vol_monitoring_active:true,
+      last_swept_date:null, replay_error:null,
+      vol_combinations:t.vol_combinations.map(c=>({...c,state:'PENDING',close_reason:null,close_date:null,close_price:null,log_return:null}))
+    };
+    try{
+      await apiUpdateTrade(t.id,resetPatch);
+      await apiRecheckTrade(t.id);
+      fixed++;
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,300));
+  }
+
+  await refreshAll();
+  if(notFoundTickers.length) console.warn('Resync: no CSV match found for these tickers (needs manual review):',notFoundTickers);
+  toast(`Resync done: ${fixed} corrected & re-verified, ${alreadyCorrect} already correct, ${notFound} not found in current CSV (see console)`,'ok');
+  if(btn){btn.disabled=false; btn.textContent='⏱ Resync call times';}
+}
+
 // ── Render ──
 function outcomeCell(reason){
   if(!reason) return '<td>—</td>';
@@ -1193,7 +1293,7 @@ function renderTrades(){
     <td class="tgt-val">${dv20k2?'₹'+fmt(dv20k2.target):'—'}</td>
     <td class="fv-val">${fvAnn??'—'}%</td>
     <td class="dv-val">${dvAnn??'—'}%</td>
-    <td class="status-${t.state.toLowerCase()}">${t.state}${replayBadge(t.replay_error)}</td>
+    <td class="status-${t.state.toLowerCase()}">${t.state}${replayBadge(t.replay_error)}${expiryBadge(t)}</td>
     <td>
       <button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>
       <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
