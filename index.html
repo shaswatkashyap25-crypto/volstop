@@ -1309,7 +1309,13 @@ async function resyncCallTimes(){
     const t=affected[i];
     if(btn) btn.textContent=`⏱ Resyncing ${i+1}/${affected.length}…`;
     updateProgress(`Resyncing ${i+1}/${affected.length} trades…`);
-    const tDate=t.entry_date||t.call_timestamp.slice(0,10);
+    // Match against the CSV using the CALL date, not entry_date -- the CSV
+    // is indexed by when the message was posted, but entry_date is when
+    // price actually crossed buy_above, which can be a completely different
+    // (later) day. Using entry_date here caused every trade that didn't
+    // trigger on the same calendar day as its call to fail matching the
+    // correct CSV row entirely.
+    const tDate=t.call_timestamp.slice(0,10);
     const tTickerNorm=t.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase();
     let key=tradeDedupeKey(t.ticker,tDate);
     let correctedTs=correctedLookup.get(key);
