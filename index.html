@@ -98,6 +98,9 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .tc{display:none}
 .tc.active{display:block}
 .tbl-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.tbl-filters{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.tbl-filters input{padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)}
+.tbl-filter-label{font-size:10px;color:var(--muted);font-family:var(--mono)}
 .exp-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer}
 .exp-btn:hover{color:var(--text)}
 .action-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--amber);cursor:pointer;margin-left:auto}
@@ -260,22 +263,29 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <button class="exp-btn" onclick="checkSplits()">⟳ Check splits &amp; adjust</button>
       <button class="exp-btn" style="border-color:var(--amber);color:var(--amber)" onclick="resyncCallTimes()">⏱ Resync call times</button>
       <button class="exp-btn" onclick="copyTableToClipboard('table-open')">⧉ Copy</button>
-      <input type="text" id="filter-open" placeholder="Filter by ticker…" oninput="renderTrades()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
       <button class="action-btn" onclick="refreshAll()">⟳ Refresh from server</button>
+    </div>
+    <div class="tbl-filters">
+      <input type="text" id="filter-open" placeholder="Search ticker, setup, status…" oninput="renderTrades()"/>
+      <span class="tbl-filter-label">Date range:</span>
+      <input type="date" id="filter-open-from" oninput="renderTrades()"/>
+      <span class="tbl-filter-label">to</span>
+      <input type="date" id="filter-open-to" oninput="renderTrades()"/>
+      <button class="exp-btn" style="padding:4px 9px;font-size:10px" onclick="clearFilters('open')">Clear</button>
     </div>
     <div class="tbl-wrap">
       <table class="tbl" id="table-open">
         <thead><tr>
           <th>#</th>
-          <th class="sortable" onclick="setSort('open','ticker')">TICKER${sortArrow('open','ticker')}</th>
-          <th class="sortable" onclick="setSort('open','date')">DATE${sortArrow('open','date')}</th>
-          <th class="sortable" onclick="setSort('open','entry')">ENTRY${sortArrow('open','entry')}</th>
-          <th class="sortable" onclick="setSort('open','setup')">SETUP${sortArrow('open','setup')}</th>
+          <th class="sortable" onclick="setSort('open','ticker')">TICKER<span id="arrow-open-ticker"></span></th>
+          <th class="sortable" onclick="setSort('open','date')">DATE<span id="arrow-open-date"></span></th>
+          <th class="sortable" onclick="setSort('open','entry')">ENTRY<span id="arrow-open-entry"></span></th>
+          <th class="sortable" onclick="setSort('open','setup')">SETUP<span id="arrow-open-setup"></span></th>
           <th>ORIG SL</th><th>ORIG TGT</th>
           <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
           <th>DV20 k2 SL</th><th>DV20 k2 TGT</th>
           <th>FV20%</th><th>DV20%</th>
-          <th class="sortable" onclick="setSort('open','status')">STATUS${sortArrow('open','status')}</th>
+          <th class="sortable" onclick="setSort('open','status')">STATUS<span id="arrow-open-status"></span></th>
           <th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-open"></tbody>
@@ -287,19 +297,31 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('closed')">Export CSV</button>
       <button class="exp-btn" onclick="copyTableToClipboard('table-closed')">⧉ Copy</button>
-      <input type="text" id="filter-closed" placeholder="Filter by ticker…" oninput="renderTrades()" style="margin-left:auto;padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
+    </div>
+    <div class="tbl-filters">
+      <input type="text" id="filter-closed" placeholder="Search ticker, setup, status…" oninput="renderTrades()"/>
+      <span class="tbl-filter-label">Date range (by</span>
+      <select id="filter-closed-basis" onchange="renderTrades()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">
+        <option value="entry">entry date</option>
+        <option value="exit">exit date</option>
+      </select>
+      <span class="tbl-filter-label">):</span>
+      <input type="date" id="filter-closed-from" oninput="renderTrades()"/>
+      <span class="tbl-filter-label">to</span>
+      <input type="date" id="filter-closed-to" oninput="renderTrades()"/>
+      <button class="exp-btn" style="padding:4px 9px;font-size:10px" onclick="clearFilters('closed')">Clear</button>
     </div>
     <div class="tbl-wrap">
       <table class="tbl" id="table-closed">
         <thead><tr>
           <th>#</th>
-          <th class="sortable" onclick="setSort('closed','ticker')">TICKER${sortArrow('closed','ticker')}</th>
-          <th class="sortable" onclick="setSort('closed','entryDate')">ENTRY DATE${sortArrow('closed','entryDate')}</th>
-          <th class="sortable" onclick="setSort('closed','exitDate')">EXIT DATE${sortArrow('closed','exitDate')}</th>
+          <th class="sortable" onclick="setSort('closed','ticker')">TICKER<span id="arrow-closed-ticker"></span></th>
+          <th class="sortable" onclick="setSort('closed','entryDate')">ENTRY DATE<span id="arrow-closed-entryDate"></span></th>
+          <th class="sortable" onclick="setSort('closed','exitDate')">EXIT DATE<span id="arrow-closed-exitDate"></span></th>
           <th>ENTRY ₹</th><th>EXIT ₹</th>
-          <th class="sortable" onclick="setSort('closed','logRet')">LOG RET${sortArrow('closed','logRet')}</th>
+          <th class="sortable" onclick="setSort('closed','logRet')">LOG RET<span id="arrow-closed-logRet"></span></th>
           <th>ORIG OUTCOME</th><th>VOL OUTCOME (FV20k2)</th>
-          <th class="sortable" onclick="setSort('closed','setup')">SETUP${sortArrow('closed','setup')}</th>
+          <th class="sortable" onclick="setSort('closed','setup')">SETUP<span id="arrow-closed-setup"></span></th>
           <th>REASON</th><th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-closed"></tbody>
@@ -312,6 +334,13 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <button class="exp-btn" onclick="exportAnalysis()">Export Analysis CSV</button>
       <button class="exp-btn" onclick="copyAnalysisToClipboard()">⧉ Copy all tables</button>
       <button class="exp-btn" onclick="exportCSV('all')" style="margin-left:4px">Export Raw Trades CSV</button>
+    </div>
+    <div class="tbl-filters">
+      <span class="tbl-filter-label">Scope to trades closed between:</span>
+      <input type="date" id="filter-analysis-from" oninput="renderAnalysis()"/>
+      <span class="tbl-filter-label">and</span>
+      <input type="date" id="filter-analysis-to" oninput="renderAnalysis()"/>
+      <button class="exp-btn" style="padding:4px 9px;font-size:10px" onclick="clearFilters('analysis')">Clear</button>
     </div>
     <div id="analysis-content"><div class="empty">Close some trades to see analysis.</div></div>
   </div>
@@ -410,11 +439,25 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <input type="text" id="filter-dismissed" placeholder="Filter by ticker…" oninput="renderDismissedList()" style="flex:1;padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
       <select id="sort-dismissed" onchange="renderDismissedList()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">
-        <option value="date-desc">Newest first</option>
-        <option value="date-asc">Oldest first</option>
+        <option value="dismissed-desc">Newest dismissed first</option>
+        <option value="dismissed-asc">Oldest dismissed first</option>
+        <option value="publish-desc">Newest publish date first</option>
+        <option value="publish-asc">Oldest publish date first</option>
         <option value="ticker-asc">Ticker A–Z</option>
         <option value="ticker-desc">Ticker Z–A</option>
       </select>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <span class="tbl-filter-label">Date range (by</span>
+      <select id="filter-dismissed-basis" onchange="renderDismissedList()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">
+        <option value="publish">publish date</option>
+        <option value="dismissed">dismissed date</option>
+      </select>
+      <span class="tbl-filter-label">):</span>
+      <input type="date" id="filter-dismissed-from" oninput="renderDismissedList()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
+      <span class="tbl-filter-label">to</span>
+      <input type="date" id="filter-dismissed-to" oninput="renderDismissedList()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
+      <button class="exp-btn" style="padding:4px 9px;font-size:10px" onclick="clearFilters('dismissed')">Clear</button>
     </div>
     <div style="display:flex;gap:6px;margin-bottom:8px">
       <button class="exp-btn" onclick="copyDismissedToClipboard()" style="flex:1">⧉ Copy</button>
@@ -1544,16 +1587,32 @@ function outcomeCell(reason){
 // toggles direction if it's already the active column, or switches to that
 // column ascending otherwise.
 const sortState={open:{column:null,dir:1},closed:{column:null,dir:1}};
+function clearFilters(table){
+  const textEl=document.getElementById(`filter-${table}`);
+  const fromEl=document.getElementById(`filter-${table}-from`);
+  const toEl=document.getElementById(`filter-${table}-to`);
+  if(textEl) textEl.value='';
+  if(fromEl) fromEl.value='';
+  if(toEl) toEl.value='';
+  if(table==='dismissed') renderDismissedList();
+  else if(table==='analysis') renderAnalysis();
+  else renderTrades();
+}
 function setSort(table,column){
   const s=sortState[table];
   if(s.column===column) s.dir*=-1;
   else{ s.column=column; s.dir=1; }
   renderTrades();
 }
-function sortArrow(table,column){
-  const s=sortState[table];
-  if(s.column!==column) return '';
-  return s.dir===1?' ▲':' ▼';
+const SORTABLE_COLUMNS={open:['ticker','date','entry','setup','status'],closed:['ticker','entryDate','exitDate','logRet','setup']};
+function updateSortArrows(){
+  for(const table in SORTABLE_COLUMNS){
+    const s=sortState[table];
+    for(const col of SORTABLE_COLUMNS[table]){
+      const el=document.getElementById(`arrow-${table}-${col}`);
+      if(el) el.textContent=s.column===col?(s.dir===1?' ▲':' ▼'):'';
+    }
+  }
 }
 // Reads whatever's currently in the DOM table (respecting any filter/sort
 // already applied) and copies it as tab-separated text, pasteable directly
@@ -1592,13 +1651,36 @@ function copyTableToClipboard(tableId){
 }
 
 function renderTrades(){
+  updateSortArrows();
   let open=ALL_TRADES.filter(t=>t.state!=='CLOSED');
   let closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
 
   const openFilter=(document.getElementById('filter-open')?.value||'').trim().toUpperCase();
-  if(openFilter) open=open.filter(t=>t.ticker.toUpperCase().includes(openFilter));
+  if(openFilter) open=open.filter(t=>
+    t.ticker.toUpperCase().includes(openFilter)||
+    (t.setup_type||'').toUpperCase().includes(openFilter)||
+    t.state.toUpperCase().includes(openFilter)
+  );
+  const openFrom=document.getElementById('filter-open-from')?.value;
+  const openTo=document.getElementById('filter-open-to')?.value;
+  if(openFrom||openTo) open=open.filter(t=>{
+    const d=t.entry_date||t.call_timestamp?.slice(0,10)||'';
+    return (!openFrom||d>=openFrom)&&(!openTo||d<=openTo);
+  });
+
   const closedFilter=(document.getElementById('filter-closed')?.value||'').trim().toUpperCase();
-  if(closedFilter) closed=closed.filter(t=>t.ticker.toUpperCase().includes(closedFilter));
+  if(closedFilter) closed=closed.filter(t=>
+    t.ticker.toUpperCase().includes(closedFilter)||
+    (t.setup_type||'').toUpperCase().includes(closedFilter)||
+    (t.close_reason||'').toUpperCase().includes(closedFilter)
+  );
+  const closedBasis=document.getElementById('filter-closed-basis')?.value||'entry';
+  const closedFrom=document.getElementById('filter-closed-from')?.value;
+  const closedTo=document.getElementById('filter-closed-to')?.value;
+  if(closedFrom||closedTo) closed=closed.filter(t=>{
+    const d=closedBasis==='exit'?(t.close_date||''):(t.entry_date||'');
+    return (!closedFrom||d>=closedFrom)&&(!closedTo||d<=closedTo);
+  });
 
   const openSortVal={
     ticker:t=>t.ticker, date:t=>t.entry_date||t.call_timestamp?.slice(0,10)||'',
@@ -1698,7 +1780,13 @@ let analysisView='combos'; // 'combos' | 'marginal' | 'interaction'
 // (Original SL/TGT + all 42 vol combos), each carrying its own list of
 // closed-and-resolved {ret,reason,setup,days} rows.
 function buildAnalysisData(){
-  const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
+  let closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
+  const from=document.getElementById('filter-analysis-from')?.value;
+  const to=document.getElementById('filter-analysis-to')?.value;
+  if(from||to) closed=closed.filter(t=>{
+    const d=t.close_date||'';
+    return (!from||d>=from)&&(!to||d<=to);
+  });
 
   function logRet(entry,exit){return (entry&&exit)?Math.log(exit/entry):null;}
 
@@ -2067,7 +2155,7 @@ let DISMISSED_CACHE=[];
 async function openDismissedModal(){
   document.getElementById('modal-dismissed').classList.add('show');
   document.getElementById('filter-dismissed').value='';
-  document.getElementById('sort-dismissed').value='date-desc';
+  document.getElementById('sort-dismissed').value='dismissed-desc';
   const el=document.getElementById('dismissed-list');
   el.innerHTML='<div class="empty" style="padding:20px">Loading…</div>';
   try{
@@ -2080,9 +2168,18 @@ function renderDismissedList(){
   let items=[...DISMISSED_CACHE];
   const filterText=(document.getElementById('filter-dismissed')?.value||'').trim().toUpperCase();
   if(filterText) items=items.filter(d=>d.ticker.toUpperCase().includes(filterText));
-  const sortMode=document.getElementById('sort-dismissed')?.value||'date-desc';
-  if(sortMode==='date-desc') items.sort((a,b)=>b.dismissed_at.localeCompare(a.dismissed_at));
-  else if(sortMode==='date-asc') items.sort((a,b)=>a.dismissed_at.localeCompare(b.dismissed_at));
+  const basis=document.getElementById('filter-dismissed-basis')?.value||'publish';
+  const from=document.getElementById('filter-dismissed-from')?.value;
+  const to=document.getElementById('filter-dismissed-to')?.value;
+  if(from||to) items=items.filter(d=>{
+    const dateVal=basis==='dismissed'?(d.dismissed_at||'').slice(0,10):(d.date||'');
+    return (!from||dateVal>=from)&&(!to||dateVal<=to);
+  });
+  const sortMode=document.getElementById('sort-dismissed')?.value||'dismissed-desc';
+  if(sortMode==='dismissed-desc') items.sort((a,b)=>b.dismissed_at.localeCompare(a.dismissed_at));
+  else if(sortMode==='dismissed-asc') items.sort((a,b)=>a.dismissed_at.localeCompare(b.dismissed_at));
+  else if(sortMode==='publish-desc') items.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  else if(sortMode==='publish-asc') items.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   else if(sortMode==='ticker-asc') items.sort((a,b)=>a.ticker.localeCompare(b.ticker));
   else if(sortMode==='ticker-desc') items.sort((a,b)=>b.ticker.localeCompare(a.ticker));
   if(!items.length){el.innerHTML=`<div class="empty" style="padding:20px">${DISMISSED_CACHE.length?'No matches.':'No dismissed trades.'}</div>`;return;}
