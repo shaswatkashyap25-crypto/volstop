@@ -49,6 +49,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .btn-sec{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);border-radius:6px;font-family:var(--mono);font-size:12px;cursor:pointer;transition:all .15s}
 .btn-sec:hover{background:#2d1f3a}
 .parsed-item{background:var(--s2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;margin-bottom:8px}
+.pc-row{display:flex;gap:8px;align-items:center;margin-top:6px}
+.pc-field{display:flex;align-items:center;gap:3px;flex:1;min-width:0}
+.pc-label{font-size:9px;color:var(--muted);font-family:var(--mono);flex-shrink:0}
+.pc-input{width:100%;min-width:0;padding:3px 5px;font-size:11px;background:var(--s1);border:1px solid var(--border2);border-radius:4px;color:var(--text);font-family:var(--mono)}
+.pc-seg button{padding:3px 8px;font-size:10px}
 .parsed-item-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .parsed-ticker{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent)}
 .parsed-ticker-input{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--accent);background:transparent;border:1px solid transparent;border-radius:4px;padding:2px 4px;width:150px}
@@ -100,6 +105,8 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .tbl-wrap{overflow-x:auto}
 .tbl{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap;font-family:var(--mono)}
 .tbl th{text-align:left;padding:7px 9px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border);background:var(--s1);letter-spacing:.5px;position:sticky;top:0}
+.tbl th.sortable{cursor:pointer;user-select:none}
+.tbl th.sortable:hover{color:var(--accent)}
 .tbl td{padding:7px 9px;border-bottom:1px solid var(--border);color:var(--text)}
 .tbl tr:hover td{background:var(--s1)}
 .c-open{color:var(--amber)}
@@ -252,16 +259,24 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <button class="exp-btn" onclick="exportCSV('open')">Export CSV</button>
       <button class="exp-btn" onclick="checkSplits()">⟳ Check splits &amp; adjust</button>
       <button class="exp-btn" style="border-color:var(--amber);color:var(--amber)" onclick="resyncCallTimes()">⏱ Resync call times</button>
+      <button class="exp-btn" onclick="copyTableToClipboard('table-open')">⧉ Copy</button>
+      <input type="text" id="filter-open" placeholder="Filter by ticker…" oninput="renderTrades()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
       <button class="action-btn" onclick="refreshAll()">⟳ Refresh from server</button>
     </div>
     <div class="tbl-wrap">
-      <table class="tbl">
+      <table class="tbl" id="table-open">
         <thead><tr>
-          <th>TICKER</th><th>DATE</th><th>ENTRY</th><th>SETUP</th>
+          <th>#</th>
+          <th class="sortable" onclick="setSort('open','ticker')">TICKER${sortArrow('open','ticker')}</th>
+          <th class="sortable" onclick="setSort('open','date')">DATE${sortArrow('open','date')}</th>
+          <th class="sortable" onclick="setSort('open','entry')">ENTRY${sortArrow('open','entry')}</th>
+          <th class="sortable" onclick="setSort('open','setup')">SETUP${sortArrow('open','setup')}</th>
           <th>ORIG SL</th><th>ORIG TGT</th>
           <th>FV20 k2 SL</th><th>FV20 k2 TGT</th>
           <th>DV20 k2 SL</th><th>DV20 k2 TGT</th>
-          <th>FV20%</th><th>DV20%</th><th>STATUS</th><th>ACTIONS</th>
+          <th>FV20%</th><th>DV20%</th>
+          <th class="sortable" onclick="setSort('open','status')">STATUS${sortArrow('open','status')}</th>
+          <th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-open"></tbody>
       </table>
@@ -271,14 +286,21 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="tc" id="tc-closed">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportCSV('closed')">Export CSV</button>
+      <button class="exp-btn" onclick="copyTableToClipboard('table-closed')">⧉ Copy</button>
+      <input type="text" id="filter-closed" placeholder="Filter by ticker…" oninput="renderTrades()" style="margin-left:auto;padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
     </div>
     <div class="tbl-wrap">
-      <table class="tbl">
+      <table class="tbl" id="table-closed">
         <thead><tr>
-          <th>TICKER</th><th>ENTRY DATE</th><th>EXIT DATE</th>
-          <th>ENTRY ₹</th><th>EXIT ₹</th><th>LOG RET</th>
+          <th>#</th>
+          <th class="sortable" onclick="setSort('closed','ticker')">TICKER${sortArrow('closed','ticker')}</th>
+          <th class="sortable" onclick="setSort('closed','entryDate')">ENTRY DATE${sortArrow('closed','entryDate')}</th>
+          <th class="sortable" onclick="setSort('closed','exitDate')">EXIT DATE${sortArrow('closed','exitDate')}</th>
+          <th>ENTRY ₹</th><th>EXIT ₹</th>
+          <th class="sortable" onclick="setSort('closed','logRet')">LOG RET${sortArrow('closed','logRet')}</th>
           <th>ORIG OUTCOME</th><th>VOL OUTCOME (FV20k2)</th>
-          <th>SETUP</th><th>REASON</th><th>ACTIONS</th>
+          <th class="sortable" onclick="setSort('closed','setup')">SETUP${sortArrow('closed','setup')}</th>
+          <th>REASON</th><th>ACTIONS</th>
         </tr></thead>
         <tbody id="tb-closed"></tbody>
       </table>
@@ -288,6 +310,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="tc" id="tc-analysis">
     <div class="tbl-actions">
       <button class="exp-btn" onclick="exportAnalysis()">Export Analysis CSV</button>
+      <button class="exp-btn" onclick="copyAnalysisToClipboard()">⧉ Copy all tables</button>
       <button class="exp-btn" onclick="exportCSV('all')" style="margin-left:4px">Export Raw Trades CSV</button>
     </div>
     <div id="analysis-content"><div class="empty">Close some trades to see analysis.</div></div>
@@ -382,8 +405,21 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 
 <!-- Dismissed Trades Modal -->
 <div class="modal-overlay" id="modal-dismissed">
-  <div class="modal" style="width:380px">
+  <div class="modal" style="width:420px">
     <h3>Dismissed trades</h3>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <input type="text" id="filter-dismissed" placeholder="Filter by ticker…" oninput="renderDismissedList()" style="flex:1;padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)"/>
+      <select id="sort-dismissed" onchange="renderDismissedList()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">
+        <option value="date-desc">Newest first</option>
+        <option value="date-asc">Oldest first</option>
+        <option value="ticker-asc">Ticker A–Z</option>
+        <option value="ticker-desc">Ticker Z–A</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="exp-btn" onclick="copyDismissedToClipboard()" style="flex:1">⧉ Copy</button>
+      <button class="exp-btn" onclick="exportDismissedCSV()" style="flex:1">Export CSV</button>
+    </div>
     <div id="dismissed-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto"></div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-dismissed')" style="flex:1">Close</button>
@@ -1085,23 +1121,26 @@ function addParsedItem(p){
   el.className='parsed-item';
   el.id=`parsed-${uid}`;
   const{date:pubDate,time:pubTime}=utcIsoToIstParts(p.callTimestamp);
-  el.innerHTML=`<div class="parsed-item-head"><input class="parsed-ticker-input" value="${escapeAttr(p.ticker)}" oninput="updateParsedTicker('${uid}',this.value)" title="Edit if this doesn't match the actual NSE symbol"/><span class="parsed-price">₹${p.entry}</span>
+  el.innerHTML=`<div class="parsed-item-head"><input class="parsed-ticker-input" value="${escapeAttr(p.ticker)}" oninput="updateParsedTicker('${uid}',this.value)" title="Edit if this doesn't match the actual NSE symbol"/>
       <button class="exp-btn" style="margin-left:auto;padding:3px 8px;font-size:10px" onclick="dismissParsedItem('${uid}')" title="Remove from this batch AND stop suggesting it in future fetches">Dismiss</button>
       <button class="btn-del-tr" onclick="removeParsedItem('${uid}')" title="Remove from this batch only">✕</button></div>
-    <div class="field" style="display:flex;gap:6px;align-items:flex-end;margin-top:4px">
-      <div style="flex:1"><label style="font-size:9px">SL (₹)</label><input type="number" step="0.05" value="${p.origSl??''}" oninput="updateParsedSlTgt('${uid}',this.value,null)" style="width:100%"/></div>
-      <div style="flex:1"><label style="font-size:9px">TGT (₹)</label><input type="number" step="0.05" value="${p.origTgt??''}" oninput="updateParsedSlTgt('${uid}',null,this.value)" style="width:100%"/></div>
+    <div class="pc-row">
+      <div class="pc-field"><span class="pc-label">ENT</span><input class="pc-input" type="number" step="0.05" value="${p.entry??''}" oninput="updateParsedEntry('${uid}',this.value)" title="Entry price"/></div>
+      <div class="pc-field"><span class="pc-label">SL</span><input class="pc-input" type="number" step="0.05" value="${p.origSl??''}" oninput="updateParsedSlTgt('${uid}',this.value,null)"/></div>
+      <div class="pc-field"><span class="pc-label">TGT</span><input class="pc-input" type="number" step="0.05" value="${p.origTgt??''}" oninput="updateParsedSlTgt('${uid}',null,this.value)"/></div>
     </div>
-    <div class="field" style="display:flex;gap:6px;align-items:flex-end;margin-top:4px">
-      <div style="flex:1"><label style="font-size:9px">PUBLISH DATE</label><input type="date" value="${pubDate}" oninput="updateParsedDateTime('${uid}',this.value,null)" style="width:100%"/></div>
-      <div style="flex:1"><label style="font-size:9px">PUBLISH TIME (IST)</label><input type="time" value="${pubTime}" oninput="updateParsedDateTime('${uid}',null,this.value)" style="width:100%"/></div>
+    <div class="pc-row">
+      <div class="pc-field"><input class="pc-input" type="date" value="${pubDate}" oninput="updateParsedDateTime('${uid}',this.value,null)"/></div>
+      <div class="pc-field"><input class="pc-input" type="time" value="${pubTime}" oninput="updateParsedDateTime('${uid}',null,this.value)"/></div>
     </div>
-    ${!p.setup?'<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px">No setup tag found — pick one below</div>':''}
-    <div class="field"><label>SETUP</label><div class="seg">
-      <button id="ps-mom-${uid}" onclick="setParsedSetup('${uid}','MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
-      <button id="ps-rev-${uid}" onclick="setParsedSetup('${uid}','REVERSAL')" class="${p.setup==='REVERSAL'?'on-rev':''}">Reversal</button>
-      <button id="ps-pull-${uid}" onclick="setParsedSetup('${uid}','PULLBACK')" class="${p.setup==='PULLBACK'?'on-pull':''}">Pullback</button>
-    </div></div>`;
+    <div class="pc-row pc-seg" style="justify-content:space-between">
+      <div class="seg">
+        <button id="ps-mom-${uid}" onclick="setParsedSetup('${uid}','MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Mom</button>
+        <button id="ps-rev-${uid}" onclick="setParsedSetup('${uid}','REVERSAL')" class="${p.setup==='REVERSAL'?'on-rev':''}">Rev</button>
+        <button id="ps-pull-${uid}" onclick="setParsedSetup('${uid}','PULLBACK')" class="${p.setup==='PULLBACK'?'on-pull':''}">Pull</button>
+      </div>
+      ${!p.setup?'<span style="font-size:9px;color:var(--amber);font-family:var(--mono)">untagged</span>':''}
+    </div>`;
   document.getElementById('parsed-list').appendChild(el);
   updateLogAllButton();
 }
@@ -1119,6 +1158,12 @@ function updateParsedSlTgt(uid,newSl,newTgt){
   if(!item) return;
   if(newSl!==null){ const v=parseFloat(newSl); item.origSl=isNaN(v)?null:v; }
   if(newTgt!==null){ const v=parseFloat(newTgt); item.origTgt=isNaN(v)?null:v; }
+}
+function updateParsedEntry(uid,newEntry){
+  const item=parsedTrades.find(x=>x.uid===uid);
+  if(!item) return;
+  const v=parseFloat(newEntry);
+  if(!isNaN(v)) item.entry=v;
 }
 
 function removeParsedItem(uid){
@@ -1495,16 +1540,97 @@ function outcomeCell(reason){
   return`<td class="c-ambig">${reason}</td>`;
 }
 
+// Sort state per table -- {column, direction}. Clicking a sortable header
+// toggles direction if it's already the active column, or switches to that
+// column ascending otherwise.
+const sortState={open:{column:null,dir:1},closed:{column:null,dir:1}};
+function setSort(table,column){
+  const s=sortState[table];
+  if(s.column===column) s.dir*=-1;
+  else{ s.column=column; s.dir=1; }
+  renderTrades();
+}
+function sortArrow(table,column){
+  const s=sortState[table];
+  if(s.column!==column) return '';
+  return s.dir===1?' ▲':' ▼';
+}
+// Reads whatever's currently in the DOM table (respecting any filter/sort
+// already applied) and copies it as tab-separated text, pasteable directly
+// into a spreadsheet. The ACTIONS column (buttons) is excluded by matching
+// its header text, not by cell content, so every row stays column-aligned.
+function copyAnalysisToClipboard(){
+  const container=document.getElementById('analysis-content');
+  const tables=[...container.querySelectorAll('table')];
+  if(!tables.length){toast('Nothing to copy — no analysis data yet','err');return;}
+  const blocks=tables.map(table=>{
+    const rows=[...table.querySelectorAll('tr')];
+    return rows.map(row=>
+      [...row.querySelectorAll('th,td')].map(c=>c.textContent.trim().replace(/\s+/g,' ')).join('\t')
+    ).join('\n');
+  });
+  navigator.clipboard.writeText(blocks.join('\n\n'))
+    .then(()=>toast(`✓ Copied ${tables.length} table(s) to clipboard`,'ok'))
+    .catch(()=>toast('Copy failed','err'));
+}
+function copyTableToClipboard(tableId){
+  const table=document.getElementById(tableId);
+  if(!table){toast('Table not found','err');return;}
+  const rows=[...table.querySelectorAll('tr')];
+  if(!rows.length){toast('Nothing to copy','err');return;}
+  const headerCells=[...rows[0].querySelectorAll('th,td')].map(c=>c.textContent.trim());
+  const skipIdx=headerCells.findIndex(h=>h.toUpperCase()==='ACTIONS');
+  const tsv=rows.map(row=>
+    [...row.querySelectorAll('th,td')]
+      .filter((_,i)=>i!==skipIdx)
+      .map(cell=>cell.textContent.trim().replace(/\s+/g,' '))
+      .join('\t')
+  ).join('\n');
+  navigator.clipboard.writeText(tsv)
+    .then(()=>toast('✓ Copied to clipboard','ok'))
+    .catch(()=>toast('Copy failed — try selecting the table manually','err'));
+}
+
 function renderTrades(){
-  const open=ALL_TRADES.filter(t=>t.state!=='CLOSED');
-  const closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
+  let open=ALL_TRADES.filter(t=>t.state!=='CLOSED');
+  let closed=ALL_TRADES.filter(t=>t.state==='CLOSED');
+
+  const openFilter=(document.getElementById('filter-open')?.value||'').trim().toUpperCase();
+  if(openFilter) open=open.filter(t=>t.ticker.toUpperCase().includes(openFilter));
+  const closedFilter=(document.getElementById('filter-closed')?.value||'').trim().toUpperCase();
+  if(closedFilter) closed=closed.filter(t=>t.ticker.toUpperCase().includes(closedFilter));
+
+  const openSortVal={
+    ticker:t=>t.ticker, date:t=>t.entry_date||t.call_timestamp?.slice(0,10)||'',
+    entry:t=>t.entry_price??t.buy_above??0, setup:t=>t.setup_type, status:t=>t.state
+  };
+  if(sortState.open.column){
+    const f=openSortVal[sortState.open.column];
+    open=[...open].sort((a,b)=>{
+      const av=f(a),bv=f(b);
+      return (av>bv?1:av<bv?-1:0)*sortState.open.dir;
+    });
+  }
+  const closedSortVal={
+    ticker:t=>t.ticker, entryDate:t=>t.entry_date||'', exitDate:t=>t.close_date||'',
+    logRet:t=>(t.entry_price&&t.close_price)?Math.log(t.close_price/t.entry_price):-Infinity,
+    setup:t=>t.setup_type
+  };
+  if(sortState.closed.column){
+    const f=closedSortVal[sortState.closed.column];
+    closed=[...closed].sort((a,b)=>{
+      const av=f(a),bv=f(b);
+      return (av>bv?1:av<bv?-1:0)*sortState.closed.dir;
+    });
+  }
 
   const ot=document.getElementById('tb-open');
-  ot.innerHTML=open.length?open.map(t=>{
+  ot.innerHTML=open.length?open.map((t,i)=>{
     const fv20k2=findCombo(t,'full',20,2);
     const dv20k2=findCombo(t,'downside',20,2);
     const fvAnn=t.vol_annualized?.fv_20, dvAnn=t.vol_annualized?.dv_20;
     return`<tr>
+    <td style="color:var(--muted)">${i+1}</td>
     <td class="c-open">${t.ticker}</td>
     <td>${t.entry_date||t.call_timestamp?.slice(0,10)||'—'}</td>
     <td>₹${fmt(t.entry_price??t.buy_above)}</td>
@@ -1525,14 +1651,15 @@ function renderTrades(){
       <button class="btn-del-tr" onclick="delTrade('${t.id}')">Del</button>
     </td>
   </tr>`;
-  }).join(''):`<tr><td colspan="14"><div class="empty">No open trades.</div></td></tr>`;
+  }).join(''):`<tr><td colspan="15"><div class="empty">No open trades.</div></td></tr>`;
 
   const ct=document.getElementById('tb-closed');
-  ct.innerHTML=closed.length?closed.map(t=>{
+  ct.innerHTML=closed.length?closed.map((t,i)=>{
     const lr=(t.entry_price&&t.close_price)?Math.log(t.close_price/t.entry_price):null;
     const cls=lr!=null?(lr>=0?'c-win':'c-loss'):'';
     const fv20k2=findCombo(t,'full',20,2);
     return`<tr>
+      <td style="color:var(--muted)">${i+1}</td>
       <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}</td>
       <td>${t.entry_date||'—'}</td><td>${t.close_date||'—'}</td>
       <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.close_price)}</td>
@@ -1546,7 +1673,7 @@ function renderTrades(){
         <button class="btn-del-tr" onclick="delTrade('${t.id}')">Del</button>
       </td>
     </tr>`;
-  }).join(''):`<tr><td colspan="11"><div class="empty">No closed trades.</div></td></tr>`;
+  }).join(''):`<tr><td colspan="12"><div class="empty">No closed trades.</div></td></tr>`;
 }
 
 // ── Analysis ──
@@ -1936,32 +2063,63 @@ async function confirmDelete(){
   deletingId=null;
 }
 
+let DISMISSED_CACHE=[];
 async function openDismissedModal(){
   document.getElementById('modal-dismissed').classList.add('show');
-  await renderDismissedList();
-}
-async function renderDismissedList(){
+  document.getElementById('filter-dismissed').value='';
+  document.getElementById('sort-dismissed').value='date-desc';
   const el=document.getElementById('dismissed-list');
   el.innerHTML='<div class="empty" style="padding:20px">Loading…</div>';
   try{
-    const items=await apiGetDismissed();
-    if(!items.length){el.innerHTML='<div class="empty" style="padding:20px">No dismissed trades.</div>';return;}
-    items.sort((a,b)=>b.dismissed_at.localeCompare(a.dismissed_at));
-    el.innerHTML=items.map(d=>`
-      <div class="parsed-item" style="display:flex;align-items:center;justify-content:space-between">
+    DISMISSED_CACHE=await apiGetDismissed();
+    renderDismissedList();
+  }catch(e){el.innerHTML=`<div class="empty" style="padding:20px">${e.message}</div>`;}
+}
+function renderDismissedList(){
+  const el=document.getElementById('dismissed-list');
+  let items=[...DISMISSED_CACHE];
+  const filterText=(document.getElementById('filter-dismissed')?.value||'').trim().toUpperCase();
+  if(filterText) items=items.filter(d=>d.ticker.toUpperCase().includes(filterText));
+  const sortMode=document.getElementById('sort-dismissed')?.value||'date-desc';
+  if(sortMode==='date-desc') items.sort((a,b)=>b.dismissed_at.localeCompare(a.dismissed_at));
+  else if(sortMode==='date-asc') items.sort((a,b)=>a.dismissed_at.localeCompare(b.dismissed_at));
+  else if(sortMode==='ticker-asc') items.sort((a,b)=>a.ticker.localeCompare(b.ticker));
+  else if(sortMode==='ticker-desc') items.sort((a,b)=>b.ticker.localeCompare(a.ticker));
+  if(!items.length){el.innerHTML=`<div class="empty" style="padding:20px">${DISMISSED_CACHE.length?'No matches.':'No dismissed trades.'}</div>`;return;}
+  el.innerHTML=items.map((d,i)=>`
+    <div class="parsed-item" style="display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:var(--muted);font-size:10px;font-family:var(--mono);width:20px">${i+1}</span>
         <div>
           <span class="parsed-ticker">${d.ticker}</span>
           <span class="parsed-orig" style="display:block;margin-top:2px">${d.date}</span>
         </div>
-        <button class="btn-recheck-tr" onclick="undoDismiss('${d.key}')">Undo</button>
-      </div>`).join('');
-  }catch(e){el.innerHTML=`<div class="empty" style="padding:20px">${e.message}</div>`;}
+      </div>
+      <button class="btn-recheck-tr" onclick="undoDismiss('${d.key}')">Undo</button>
+    </div>`).join('');
+}
+function copyDismissedToClipboard(){
+  if(!DISMISSED_CACHE.length){toast('Nothing to copy','err');return;}
+  const tsv=['TICKER\tDATE\tDISMISSED AT',...DISMISSED_CACHE.map(d=>`${d.ticker}\t${d.date}\t${d.dismissed_at}`)].join('\n');
+  navigator.clipboard.writeText(tsv)
+    .then(()=>toast('✓ Copied to clipboard','ok'))
+    .catch(()=>toast('Copy failed','err'));
+}
+function exportDismissedCSV(){
+  if(!DISMISSED_CACHE.length){toast('Nothing to export','err');return;}
+  const csv=['ticker,date,dismissed_at',...DISMISSED_CACHE.map(d=>`${d.ticker},${d.date},${d.dismissed_at}`)].join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='dismissed_trades.csv';
+  a.click();
 }
 async function undoDismiss(key){
   try{
     await apiUndismiss(key);
     toast('Un-dismissed ✓','ok');
-    await renderDismissedList();
+    DISMISSED_CACHE=await apiGetDismissed();
+    renderDismissedList();
   }catch(e){toast(e.message,'err');}
 }
 async function manualRecheck(id){
