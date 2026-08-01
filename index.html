@@ -179,6 +179,12 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="field"><label>ENTRY PRICE (₹)</label>
       <input id="inp-price" type="number" placeholder="0.00" step="0.05" onkeydown="if(event.key==='Enter')compute()"/>
     </div>
+    <div class="field"><label>PUBLISH DATE</label>
+      <input id="inp-date" type="date"/>
+    </div>
+    <div class="field"><label>PUBLISH TIME (IST)</label>
+      <input id="inp-time" type="time"/>
+    </div>
     <div class="field"><label>SETUP TYPE</label>
       <div class="seg">
         <button id="b-mom" onclick="setSeg('MOMENTUM')">Momentum</button>
@@ -287,17 +293,17 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   <div class="modal">
     <h3 id="modal-close-title">Close trade</h3>
     <div class="modal-form">
-      <div class="field"><label>EXIT PRICE (₹)</label><input id="m-price" type="number" step="0.05"/></div>
-      <div class="field"><label>EXIT DATE</label><input id="m-date" type="date"/></div>
+      <div class="field" id="m-price-field"><label>EXIT PRICE (₹)</label><input id="m-price" type="number" step="0.05"/></div>
+      <div class="field" id="m-date-field"><label>EXIT DATE</label><input id="m-date" type="date"/></div>
       <div class="field"><label>EXIT REASON</label>
-        <select id="m-reason">
+        <select id="m-reason" onchange="toggleCloseExitFields()">
           <option value="TARGET_HIT">Target hit</option>
           <option value="SL_HIT">Stop hit</option>
-          <option value="AMBIGUOUS">Ambiguous (SL &amp; target same day)</option>
           <option value="MANUAL">Manual exit</option>
           <option value="NOT_TRIGGERED">Not triggered</option>
         </select>
       </div>
+      <div id="m-not-triggered-note" style="display:none;font-size:10px;font-family:var(--mono);color:var(--muted)">This trade never entered, so there's no exit price to record — today's date is saved automatically as when this was marked.</div>
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-close')">Cancel</button>
@@ -313,7 +319,10 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="modal-form">
       <div class="field"><label>TICKER</label><input id="e-ticker" type="text"/></div>
       <div class="field"><label>BUY ABOVE / ENTRY (₹)</label><input id="e-price" type="number" step="0.05"/></div>
-      <div class="field"><label>ENTRY DATE</label><input id="e-date" type="date"/></div>
+      <div class="field"><label>ORIG SL (₹)</label><input id="e-sl" type="number" step="0.05"/></div>
+      <div class="field"><label>ORIG TGT (₹)</label><input id="e-tgt" type="number" step="0.05"/></div>
+      <div class="field"><label>PUBLISH DATE (when this call was made)</label><input id="e-date" type="date"/></div>
+      <div class="field"><label>PUBLISH TIME (IST)</label><input id="e-time" type="time"/></div>
       <div class="field"><label>SETUP TYPE</label>
         <select id="e-setup">
           <option value="MOMENTUM">Momentum</option>
@@ -325,6 +334,24 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-edit')">Cancel</button>
       <button class="btn-confirm-accent" id="btn-confirm-edit" onclick="confirmEdit()">Save</button>
+    </div>
+    <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-top:8px">Saving any field above fully resets this trade's tracking from the new publish time — any prior trigger/close outcome is discarded and re-verified from scratch.</div>
+
+    <div id="e-outcome-section" style="display:none;margin-top:16px;padding-top:14px;border-top:1px solid var(--border2)">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--text);margin-bottom:8px">Or, just correct the recorded outcome (no re-verification)</div>
+      <div class="modal-form">
+        <div class="field"><label>EXIT PRICE (₹)</label><input id="e-exit-price" type="number" step="0.05"/></div>
+        <div class="field"><label>EXIT DATE</label><input id="e-exit-date" type="date"/></div>
+        <div class="field"><label>EXIT REASON</label>
+          <select id="e-exit-reason">
+            <option value="TARGET_HIT">Target hit</option>
+            <option value="SL_HIT">Stop hit</option>
+            <option value="MANUAL">Manual exit</option>
+            <option value="NOT_TRIGGERED">Not triggered</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn-confirm-accent" style="width:100%" onclick="confirmOutcomeOverride()">Save outcome only</button>
     </div>
   </div>
 </div>
@@ -806,12 +833,15 @@ async function logSingleTrade(){
   const btn=document.getElementById('btn-log-single');
   btn.disabled=true; btn.innerHTML='<span class="spin"></span>Logging…';
   try{
+    const publishDate=document.getElementById('inp-date').value;
+    const publishTime=document.getElementById('inp-time').value||'09:15';
+    const callTimestamp=csvDateTimeToUtcISOString(publishDate,publishTime)||new Date().toISOString();
     // Single Trade mode has no pre-existing call, so no orig_sl/orig_tgt is
     // sent at all — the Worker treats that as "no original outcome to track,
     // just the 42 vol combinations."
     await apiCreateTrade({
       ticker:cur.ticker, setup_type:cur.setup_type, buy_above:cur.entry_price,
-      call_timestamp:new Date().toISOString(),
+      call_timestamp:callTimestamp,
       vol_annualized:cur.vol_annualized,
       vol_combinations:combosToApiShape(cur.combos)
     });
@@ -856,6 +886,16 @@ function csvDateTimeToUtcISOString(dateStr,timeStr){
   return new Date(utcMs).toISOString();
 }
 
+// Reverse of the above -- a UTC ISO timestamp back to its IST date/time
+// parts, for pre-filling the Edit modal with the trade's current actual
+// publish time rather than leaving it blank.
+function utcIsoToIstParts(isoString){
+  if(!isoString) return{date:'',time:''};
+  const istMs=new Date(isoString).getTime()+(5.5*60*60*1000);
+  const istShifted=new Date(istMs);
+  return{date:istShifted.toISOString().slice(0,10),time:istShifted.toISOString().slice(11,16)};
+}
+
 async function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
@@ -882,7 +922,7 @@ async function parsePaste(){
     if(!tagMatch) return; // stray text / non-trade chat lines
 
     let entryDate=new Date().toISOString().split('T')[0];
-    let callTimestamp=null; // exact timestamp when available; null falls back to entryDate at log time
+    let callTimestamp=null;
 
     const waMatch=block.match(WA_HEADER_RE);
     if(waMatch){
@@ -893,6 +933,12 @@ async function parsePaste(){
       const dateMatch=block.match(/\[(\d{2})\/(\d{2})\/(\d{2})/);
       if(dateMatch) entryDate=`20${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
     }
+    // No exact timestamp found (no WA header) -- default to a real usable
+    // value (today, or whatever partial date WAS found, at 9:15 AM) instead
+    // of leaving callTimestamp null, which previously fell through to
+    // midnight UTC at log time -- the same bug we fixed for TG-fetch, just
+    // via a different path. Editable per-item in the review card below.
+    if(!callTimestamp) callTimestamp=csvDateTimeToUtcISOString(entryDate,'09:15');
 
     // setup type: #REVERSAL, #MOMENTUM, or #PULLBACK if present anywhere in
     // the block; if only #POSITIONAL, leave blank rather than guess.
@@ -972,7 +1018,7 @@ async function fetchTGTrades(){
         orig_sl:slMatch?parseFloat(slMatch[1]):null,
         orig_tgt:tgtMatch?parseFloat(tgtMatch[1]):null,
         entry_date:(date||'').trim(),
-        call_timestamp:csvDateTimeToUtcISOString((date||'').trim(),(time||'').trim()),
+        call_timestamp:csvDateTimeToUtcISOString((date||'').trim(),(time||'').trim())||csvDateTimeToUtcISOString((date||'').trim(),'09:15'),
         holding_period_days:holdMatch?parseInt(holdMatch[1],10):null,
         setup_type:(setupRaw||'').trim().toUpperCase()||null
       };
@@ -1025,10 +1071,18 @@ function addParsedItem(p){
   const el=document.createElement('div');
   el.className='parsed-item';
   el.id=`parsed-${uid}`;
+  const{date:pubDate,time:pubTime}=utcIsoToIstParts(p.callTimestamp);
   el.innerHTML=`<div class="parsed-item-head"><input class="parsed-ticker-input" value="${escapeAttr(p.ticker)}" oninput="updateParsedTicker('${uid}',this.value)" title="Edit if this doesn't match the actual NSE symbol"/><span class="parsed-price">₹${p.entry}</span>
       <button class="exp-btn" style="margin-left:auto;padding:3px 8px;font-size:10px" onclick="dismissParsedItem('${uid}')" title="Remove from this batch AND stop suggesting it in future fetches">Dismiss</button>
       <button class="btn-del-tr" onclick="removeParsedItem('${uid}')" title="Remove from this batch only">✕</button></div>
-    <div class="parsed-orig">SL <span class="orig-sl">${p.origSl?'₹'+p.origSl:'—'}</span> &nbsp; TGT <span class="orig-tgt">${p.origTgt?'₹'+p.origTgt:'—'}</span> &nbsp; ${p.entryDate}${p.callTimestamp?' '+new Date(p.callTimestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Kolkata'})+' IST':''}</div>
+    <div class="field" style="display:flex;gap:6px;align-items:flex-end;margin-top:4px">
+      <div style="flex:1"><label style="font-size:9px">SL (₹)</label><input type="number" step="0.05" value="${p.origSl??''}" oninput="updateParsedSlTgt('${uid}',this.value,null)" style="width:100%"/></div>
+      <div style="flex:1"><label style="font-size:9px">TGT (₹)</label><input type="number" step="0.05" value="${p.origTgt??''}" oninput="updateParsedSlTgt('${uid}',null,this.value)" style="width:100%"/></div>
+    </div>
+    <div class="field" style="display:flex;gap:6px;align-items:flex-end;margin-top:4px">
+      <div style="flex:1"><label style="font-size:9px">PUBLISH DATE</label><input type="date" value="${pubDate}" oninput="updateParsedDateTime('${uid}',this.value,null)" style="width:100%"/></div>
+      <div style="flex:1"><label style="font-size:9px">PUBLISH TIME (IST)</label><input type="time" value="${pubTime}" oninput="updateParsedDateTime('${uid}',null,this.value)" style="width:100%"/></div>
+    </div>
     ${!p.setup?'<div style="font-size:10px;font-family:var(--mono);color:var(--amber);margin-bottom:4px">No setup tag found — pick one below</div>':''}
     <div class="field"><label>SETUP</label><div class="seg">
       <button id="ps-mom-${uid}" onclick="setParsedSetup('${uid}','MOMENTUM')" class="${p.setup==='MOMENTUM'?'on-mom':''}">Momentum</button>
@@ -1037,6 +1091,21 @@ function addParsedItem(p){
     </div></div>`;
   document.getElementById('parsed-list').appendChild(el);
   updateLogAllButton();
+}
+function updateParsedDateTime(uid,newDate,newTime){
+  const item=parsedTrades.find(x=>x.uid===uid);
+  if(!item) return;
+  const{date:curDate,time:curTime}=utcIsoToIstParts(item.callTimestamp);
+  const date=newDate??curDate;
+  const time=newTime??curTime;
+  const ts=csvDateTimeToUtcISOString(date,time);
+  if(ts){ item.callTimestamp=ts; item.entryDate=date; }
+}
+function updateParsedSlTgt(uid,newSl,newTgt){
+  const item=parsedTrades.find(x=>x.uid===uid);
+  if(!item) return;
+  if(newSl!==null){ const v=parseFloat(newSl); item.origSl=isNaN(v)?null:v; }
+  if(newTgt!==null){ const v=parseFloat(newTgt); item.origTgt=isNaN(v)?null:v; }
 }
 
 function removeParsedItem(uid){
@@ -1661,16 +1730,28 @@ function openClose(id){
   document.getElementById('modal-close-title').textContent='Close — '+t.ticker;
   document.getElementById('m-date').value=new Date().toISOString().split('T')[0];
   document.getElementById('m-price').value='';
+  document.getElementById('m-reason').value='TARGET_HIT';
+  toggleCloseExitFields();
   document.getElementById('modal-close').classList.add('show');
+}
+function toggleCloseExitFields(){
+  const isNotTriggered=document.getElementById('m-reason').value==='NOT_TRIGGERED';
+  document.getElementById('m-price-field').style.display=isNotTriggered?'none':'';
+  document.getElementById('m-date-field').style.display=isNotTriggered?'none':'';
+  document.getElementById('m-not-triggered-note').style.display=isNotTriggered?'':'none';
 }
 async function confirmClose(){
   if(!closingId) return;
   const ep=parseFloat(document.getElementById('m-price').value);
   const ed=document.getElementById('m-date').value;
   const er=document.getElementById('m-reason').value;
-  if(!ep||!ed){toast('Fill all fields','err');return;}
+  const isNotTriggered=er==='NOT_TRIGGERED';
+  if(!isNotTriggered&&(!ep||!ed)){toast('Fill all fields','err');return;}
   try{
-    await apiUpdateTrade(closingId,{state:'CLOSED',close_price:ep,close_date:ed,close_reason:er,auto_closed:false});
+    const patch=isNotTriggered
+      ?{state:'CLOSED',close_price:null,close_date:new Date().toISOString().slice(0,10),close_reason:er,auto_closed:false}
+      :{state:'CLOSED',close_price:ep,close_date:ed,close_reason:er,auto_closed:false};
+    await apiUpdateTrade(closingId,patch);
     closeModal('modal-close'); await refreshAll();
     toast('Trade closed ✓','ok');
   }catch(e){toast(e.message,'err');}
@@ -1684,9 +1765,43 @@ function openEdit(id){
   // sets itself once the trigger fires, and is only shown here as a fallback
   // for already-OPEN/CLOSED trades where buy_above and entry_price match.
   document.getElementById('e-price').value=t.buy_above??t.entry_price;
-  document.getElementById('e-date').value=t.entry_date||t.call_timestamp?.slice(0,10)||'';
+  document.getElementById('e-sl').value=t.orig_sl??'';
+  document.getElementById('e-tgt').value=t.orig_tgt??'';
+  const{date,time}=utcIsoToIstParts(t.call_timestamp);
+  document.getElementById('e-date').value=date||t.entry_date||'';
+  document.getElementById('e-time').value=time||'09:15';
   document.getElementById('e-setup').value=t.setup_type;
+
+  const outcomeSection=document.getElementById('e-outcome-section');
+  if(t.state==='CLOSED'){
+    outcomeSection.style.display='';
+    document.getElementById('e-exit-price').value=t.close_price??'';
+    document.getElementById('e-exit-date').value=t.close_date??'';
+    document.getElementById('e-exit-reason').value=t.close_reason||'MANUAL';
+  }else{
+    outcomeSection.style.display='none';
+  }
+
   document.getElementById('modal-edit').classList.add('show');
+}
+// Corrects only the recorded outcome (exit price/date/reason) without
+// touching the trade's parameters or re-running the sweep -- for when the
+// underlying call was right but the recorded exit itself needs a fix.
+async function confirmOutcomeOverride(){
+  if(!editingId) return;
+  const reason=document.getElementById('e-exit-reason').value;
+  const isNotTriggered=reason==='NOT_TRIGGERED';
+  const ep=parseFloat(document.getElementById('e-exit-price').value);
+  const ed=document.getElementById('e-exit-date').value;
+  if(!isNotTriggered&&(!ep||!ed)){toast('Fill exit price and date','err');return;}
+  try{
+    const patch=isNotTriggered
+      ?{close_price:null,close_date:ed||new Date().toISOString().slice(0,10),close_reason:reason,auto_closed:false}
+      :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false};
+    await apiUpdateTrade(editingId,patch);
+    closeModal('modal-edit'); await refreshAll();
+    toast('Outcome corrected ✓','ok');
+  }catch(e){toast(e.message,'err');}
 }
 // Rebuilds each vol combo into a fresh PENDING record -- mirrors what the
 // Worker's buildNewTrade() does for a brand-new trade. Needed whenever
@@ -1705,12 +1820,18 @@ async function confirmEdit(){
   if(!editingId) return;
   const t=ALL_TRADES.find(x=>x.id===editingId);
   const newPrice=parseFloat(document.getElementById('e-price').value);
+  const newSlRaw=document.getElementById('e-sl').value;
+  const newTgtRaw=document.getElementById('e-tgt').value;
+  const newSl=newSlRaw===''?null:parseFloat(newSlRaw);
+  const newTgt=newTgtRaw===''?null:parseFloat(newTgtRaw);
   const newDate=document.getElementById('e-date').value;
+  const newTime=document.getElementById('e-time').value||'09:15';
   const newTicker=document.getElementById('e-ticker').value.trim().toUpperCase();
   const newSetup=document.getElementById('e-setup').value;
   const btn=document.getElementById('btn-confirm-edit');
   btn.disabled=true; btn.textContent='Recalculating…';
   try{
+    const newCallTimestamp=csvDateTimeToUtcISOString(newDate,newTime);
     // Entry price is changing — stop/target = entry * exp(±k*vol/√252), so
     // they must be recomputed from scratch, not left at whatever they were
     // under the old entry price. Vol% itself barely moves over a few days,
@@ -1718,23 +1839,29 @@ async function confirmEdit(){
     const d=await computeVol(newTicker,newPrice,newSetup,newDate);
     const patch={
       ticker:d.ticker,
-      entry_date:newDate,
+      call_timestamp:newCallTimestamp||t.call_timestamp,
       setup_type:newSetup,
       buy_above:newPrice,
+      orig_sl:newSl,
+      orig_tgt:newTgt,
       vol_annualized:d.vol_annualized,
-      vol_combinations:comboSkeleton(d.combos)
+      vol_combinations:comboSkeleton(d.combos),
+      // Full reset -- same fields Resync clears, same reason: a trade's
+      // trigger/close outcome depends entirely on when it's checked FROM.
+      // Leaving any of this in place risks the sweep resuming past the
+      // window where the new price/time would actually have triggered.
+      state:'PENDING', entry_date:null, entry_time:null, entry_price:null,
+      close_reason:null, close_date:null, close_price:null,
+      auto_closed:false, vol_monitoring_active:true,
+      last_swept_date:null, replay_error:null
     };
-    // Only touch entry_price for trades that have already triggered — for a
-    // PENDING trade, entry_price must stay null until the recheck below
-    // actually confirms price crossed the new buy_above.
-    if(t.state!=='PENDING') patch.entry_price=newPrice;
     await apiUpdateTrade(editingId,patch);
     // buy_above just changed — PUT only merges fields, it doesn't re-run the
     // trigger check, so without this the trade would silently keep waiting
     // on the OLD price.
     await apiRecheckTrade(editingId);
     closeModal('modal-edit'); await refreshAll();
-    toast('Trade updated ✓ — SL/TGT recalculated & rechecked','ok');
+    toast('Trade updated ✓ — fully reset & re-verified from the new publish time','ok');
   }catch(e){toast(e.message,'err');}
   finally{ btn.disabled=false; btn.textContent='Save'; }
 }
@@ -1889,6 +2016,8 @@ function hideProgressBanner(){
   document.getElementById('progress-banner').style.display='none';
 }
 
+document.getElementById('inp-date').value=new Date().toISOString().slice(0,10);
+document.getElementById('inp-time').value='09:15';
 setSeg('MOMENTUM');
 refreshAll();
 </script>
