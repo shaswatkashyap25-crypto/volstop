@@ -179,6 +179,12 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <div class="field"><label>ENTRY PRICE (₹)</label>
       <input id="inp-price" type="number" placeholder="0.00" step="0.05" onkeydown="if(event.key==='Enter')compute()"/>
     </div>
+    <div class="field"><label>ORIG SL (₹) — optional</label>
+      <input id="inp-sl" type="number" placeholder="0.00" step="0.05"/>
+    </div>
+    <div class="field"><label>ORIG TGT (₹) — optional</label>
+      <input id="inp-tgt" type="number" placeholder="0.00" step="0.05"/>
+    </div>
     <div class="field"><label>PUBLISH DATE</label>
       <input id="inp-date" type="date"/>
     </div>
@@ -228,6 +234,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
     <button class="btn-sec" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
     <button class="exp-btn" style="width:100%" onclick="openDismissedModal()">Manage dismissed trades</button>
+    <button class="exp-btn" style="width:100%" onclick="syncReviewList()" title="Remove items from this list that someone else has already logged or dismissed">⟳ Sync review list</button>
     <div id="parsed-list"></div>
     <button class="btn-main" id="btn-log-all" style="display:none" onclick="logAllParsed()">↓ Log all trades</button>
   </div>
@@ -836,11 +843,15 @@ async function logSingleTrade(){
     const publishDate=document.getElementById('inp-date').value;
     const publishTime=document.getElementById('inp-time').value||'09:15';
     const callTimestamp=csvDateTimeToUtcISOString(publishDate,publishTime)||new Date().toISOString();
-    // Single Trade mode has no pre-existing call, so no orig_sl/orig_tgt is
-    // sent at all — the Worker treats that as "no original outcome to track,
-    // just the 42 vol combinations."
+    const slRaw=document.getElementById('inp-sl').value;
+    const tgtRaw=document.getElementById('inp-tgt').value;
+    // Optional -- if left blank, no orig_sl/orig_tgt is sent, and the Worker
+    // treats that as "no original outcome to track, just the 42 vol combos,"
+    // same as before this field existed.
     await apiCreateTrade({
       ticker:cur.ticker, setup_type:cur.setup_type, buy_above:cur.entry_price,
+      orig_sl:slRaw?parseFloat(slRaw):undefined,
+      orig_tgt:tgtRaw?parseFloat(tgtRaw):undefined,
       call_timestamp:callTimestamp,
       vol_annualized:cur.vol_annualized,
       vol_combinations:combosToApiShape(cur.combos)
@@ -1040,10 +1051,12 @@ async function fetchTGTrades(){
     const dismissedItems=await apiGetDismissed().catch(()=>[]);
     const dismissedKeys=new Set(dismissedItems.map(d=>d.key));
     let added=0, skippedDismissed=0;
+    const localKeys=new Set(parsedTrades.map(p=>tradeDedupeKey(p.ticker,p.entryDate)));
     for(const row of rows){
       if(!row.ticker||!row.entry_price) continue;
       const key=tradeDedupeKey(row.ticker,row.entry_date);
       if(existingKeys.has(key)) continue;
+      if(localKeys.has(key)) continue; // already sitting in this review list from a previous fetch -- don't duplicate it in the UI
       if(dismissedKeys.has(key)){ skippedDismissed++; continue; }
       addParsedItem({
         ticker:row.ticker, originalTicker:row.originalTicker, rawTickerText:row.rawTickerText, entry:parseFloat(row.entry_price),
@@ -1114,6 +1127,31 @@ function removeParsedItem(uid){
   parsedTrades.splice(idx,1);
   document.getElementById('parsed-'+uid)?.remove();
   updateLogAllButton();
+}
+
+// Reconciles the CURRENT review list against the live server -- removes any
+// item that's since been logged or dismissed by someone else (e.g. a
+// colleague working the same list), without re-fetching the CSV or adding
+// new candidates. Fixes the "list stays artificially long, more scrolling
+// than necessary" problem when two people work from the same TG fetch.
+async function syncReviewList(){
+  if(!parsedTrades.length){toast('Review list is empty','ok');return;}
+  toast('Syncing review list…','');
+  try{
+    const fresh=await apiGetTrades();
+    const freshKeys=new Set(fresh.map(t=>tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10))));
+    const dismissedItems=await apiGetDismissed().catch(()=>[]);
+    const dismissedKeys=new Set(dismissedItems.map(d=>d.key));
+    let removed=0;
+    for(const p of [...parsedTrades]){
+      const key=tradeDedupeKey(p.ticker,p.entryDate);
+      if(freshKeys.has(key)||dismissedKeys.has(key)){
+        removeParsedItem(p.uid);
+        removed++;
+      }
+    }
+    toast(removed?`✓ ${removed} item(s) removed — already handled elsewhere`:'✓ List is already up to date','ok');
+  }catch(e){toast('Sync failed: '+e.message,'err');}
 }
 
 async function dismissParsedItem(uid){
@@ -1193,17 +1231,22 @@ async function logAllParsed(){
   // checked, so a manually-pasted message for an already-dismissed
   // ticker+date could slip through uncaught.
   const existing=await apiGetTrades().catch(()=>[]);
-  const existingKeys=new Set(existing.map(t=>tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10))));
+  const existingByKey=new Map(existing.map(t=>[tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10)),t]));
   const dismissedForLog=await apiGetDismissed().catch(()=>[]);
   const dismissedKeysForLog=new Set(dismissedForLog.map(d=>d.key));
+  const conflictingTags=[]; // trades where someone's local tag choice differed from what actually got saved
   for(let i=0;i<total;i++){
     const p=ready[i];
     btn.innerHTML=`<span class="spin"></span>Logging ${i+1}/${total}…`;
     if(i===0) showProgress(`Logging ${i+1}/${total} trades…`);
     else updateProgress(`Logging ${i+1}/${total} trades…`);
     const key=tradeDedupeKey(p.ticker,p.entryDate);
-    if(existingKeys.has(key)||dismissedKeysForLog.has(key)){
+    const existingMatch=existingByKey.get(key);
+    if(existingMatch||dismissedKeysForLog.has(key)){
       skippedDup++;
+      if(existingMatch&&p.setup&&existingMatch.setup_type&&p.setup!==existingMatch.setup_type){
+        conflictingTags.push(`${p.ticker}: you had "${p.setup}", already logged as "${existingMatch.setup_type}"`);
+      }
       removeParsedItem(p.uid);
       continue;
     }
@@ -1225,7 +1268,7 @@ async function logAllParsed(){
         vol_annualized:d.vol_annualized,
         vol_combinations:combosToApiShape(d.combos).map(c=>({...c,stop:c.stop!=null?c.stop/factor:null,target:c.target!=null?c.target/factor:null}))
       });
-      existingKeys.add(key); // so a second identical entry later in this SAME batch is also caught
+      existingByKey.set(key,{setup_type:d.setup_type}); // so a second identical entry later in this SAME batch is also caught, and reports the tag it was actually logged under
       // If the ticker got corrected along the way (auto-suggestion accepted,
       // or manually edited in the review card), persist that mapping now
       // that it's actually confirmed by a successful log -- this is what
@@ -1275,7 +1318,10 @@ async function logAllParsed(){
   if(failures.length){
     console.warn(`logAllParsed: ${failures.length} trade(s) failed —`, failures);
   }
-  finishProgress(`✓ ${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate/dismissed skipped`:''}${fail?', '+fail+' failed (see console, left in list to retry)':''}${notReady?`, ${notReady} still need a tag`:''}`);
+  if(conflictingTags.length){
+    console.warn(`logAllParsed: ${conflictingTags.length} skipped duplicate(s) had a DIFFERENT tag than what's actually saved —`, conflictingTags);
+  }
+  finishProgress(`✓ ${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate/dismissed skipped${conflictingTags.length?` (${conflictingTags.length} had a different tag — see console)`:''}`:''}${fail?', '+fail+' failed (see console, left in list to retry)':''}${notReady?`, ${notReady} still need a tag`:''}`);
   btn.disabled=false;
   updateLogAllButton();
   if(!parsedTrades.length){
