@@ -129,10 +129,13 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .btn-confirm{background:var(--green);color:#0d0f12;border:none}
 .btn-confirm-accent{background:var(--accent2);color:#fff;border:none}
 .btn-cancel{background:transparent;border:1px solid var(--border2);color:var(--muted)}
-.toast{position:fixed;bottom:20px;right:20px;padding:9px 14px;border-radius:8px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);color:var(--text);opacity:0;transform:translateY(6px);transition:all .22s;pointer-events:none;z-index:200}
+.toast{position:fixed;bottom:20px;right:20px;padding:9px 14px;border-radius:8px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);color:var(--text);opacity:0;transform:translateY(6px);transition:all .22s;pointer-events:none;z-index:200;max-width:420px}
 .toast.show{opacity:1;transform:translateY(0)}
 .toast.ok{border-color:var(--green);color:var(--green)}
 .toast.err{border-color:var(--red);color:var(--red)}
+.toast.persistent{pointer-events:auto;display:flex;align-items:flex-start;gap:10px}
+.toast-dismiss-btn{flex-shrink:0;padding:3px 9px;background:transparent;border:1px solid currentColor;border-radius:4px;color:inherit;font-family:var(--mono);font-size:10px;cursor:pointer;opacity:.8}
+.toast-dismiss-btn:hover{opacity:1}
 .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp .65s linear infinite;vertical-align:middle;margin-right:4px}
 @keyframes sp{to{transform:rotate(360deg)}}
 ::-webkit-scrollbar{width:4px;height:4px}
@@ -354,6 +357,10 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   </div>
 </div>
 
+<div id="progress-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:1000;background:var(--s2);border-bottom:2px solid var(--accent);padding:10px 20px;align-items:center;justify-content:space-between;font-family:var(--mono);font-size:12px;gap:12px">
+  <span id="progress-banner-text" style="display:flex;align-items:center;gap:8px"></span>
+  <button id="progress-banner-close" onclick="hideProgressBanner()" style="display:none;padding:4px 10px;background:transparent;border:1px solid var(--border2);border-radius:4px;color:var(--muted);font-family:var(--mono);font-size:11px;cursor:pointer">✕ Dismiss</button>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -639,6 +646,16 @@ async function apiUndismiss(key){
   const r=await fetch(WORKER+'/dismissed/'+encodeURIComponent(key),{method:'DELETE'});
   if(!r.ok) throw new Error('Undo failed');
 }
+async function apiGetTickerCorrections(){
+  const r=await fetch(WORKER+'/ticker-corrections');
+  if(!r.ok) throw new Error('Failed to load ticker corrections');
+  const j=await r.json();
+  return j.corrections||[];
+}
+async function apiAddTickerCorrection(original,corrected){
+  const r=await fetch(WORKER+'/ticker-corrections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({original,corrected})});
+  if(!r.ok) throw new Error('Failed to save ticker correction');
+}
 
 // Turns the flat combos[] from computeVol into the exact 42-entry shape the
 // Worker requires on POST /trades.
@@ -839,9 +856,12 @@ function csvDateTimeToUtcISOString(dateStr,timeStr){
   return new Date(utcMs).toISOString();
 }
 
-function parsePaste(){
+async function parsePaste(){
   const text=document.getElementById('paste-input').value.trim();
   if(!text){toast('Paste some trade messages first','err');return;}
+
+  const knownCorrections=await apiGetTickerCorrections().catch(()=>[]);
+  const correctionsMap=new Map(knownCorrections.map(c=>[c.original,c.corrected]));
 
   // If the paste has WhatsApp/Telegram export headers, split on THAT
   // boundary instead of on the trade tag. Splitting on the tag alone leaves
@@ -888,7 +908,8 @@ function parsePaste(){
     const afterTag=block.slice(tagMatch.index+tagMatch[0].length);
     const bodyLines=afterTag.split(/\n/).map(l=>l.trim()).filter(Boolean);
     const rawTickerText=bodyLines[0];
-    const ticker=bodyLines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
+    const scrapedTicker=bodyLines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
+    const ticker=correctionsMap.get(scrapedTicker)||scrapedTicker;
     const buyLine=bodyLines.find(l=>/BUY\s*(?:ABOVE|AT)/i.test(l));
     const slLine=bodyLines.find(l=>/^SL:/i.test(l));
     const tgtLine=bodyLines.find(l=>/^TGT:/i.test(l));
@@ -898,7 +919,7 @@ function parsePaste(){
     const origSl=slLine?parseFloat(slLine.replace(/[^0-9.]/g,'')):null;
     const origTgt=tgtLine?parseFloat(tgtLine.replace(/[^0-9.]/g,'')):null;
     if(!entry||isNaN(entry)) return;
-    addParsedItem({ticker,rawTickerText,entry,origSl,origTgt,entryDate,callTimestamp,holdingPeriodDays:holdMatch?parseInt(holdMatch[1],10):null,setup:setupType});
+    addParsedItem({ticker,originalTicker:scrapedTicker,rawTickerText,entry,origSl,origTgt,entryDate,callTimestamp,holdingPeriodDays:holdMatch?parseInt(holdMatch[1],10):null,setup:setupType});
   });
   if(!parsedTrades.length){toast('No trades found — check format','err');return;}
   toast(`${parsedTrades.length} trade${parsedTrades.length>1?'s':''} parsed`,'ok');
@@ -919,6 +940,14 @@ async function fetchTGTrades(){
     // free-text message (e.g. "#POSITIONAL BANKINDIA BUY ABOVE: 161 SL:
     // 159.5 TGT: 165.5 Holding Period: 30 Days"), extracted the same way
     // parsePaste() already extracts them from a pasted WhatsApp message.
+    // Known ticker corrections (e.g. "ASHOKLEYLAND" -> "ASHOKLEY"), confirmed
+    // by a previous successful log. Applying these immediately means a
+    // ticker that's already been fixed once never resurfaces broken again --
+    // it also matches correctly against the already-logged trade during
+    // dedup below, instead of looking like a "new" candidate every time.
+    const knownCorrections=await apiGetTickerCorrections().catch(()=>[]);
+    const correctionsMap=new Map(knownCorrections.map(c=>[c.original,c.corrected]));
+
     const rows=lines.map(line=>{
       const parts=line.split(',');
       const[,ticker,setupRaw,date,time,priceStr,,,...rest]=parts;
@@ -934,8 +963,10 @@ async function fetchTGTrades(){
       const buyIdx=afterTagInMsg.search(/BUY\s*(?:ABOVE|AT)/i);
       const rawTickerText=buyIdx>=0?afterTagInMsg.slice(0,buyIdx).trim():null;
       const holdMatch=messageText.match(/Holding\s*Period\s*:?\s*(\d+)\s*Days?/i);
+      const scrapedTicker=(ticker||'').trim().toUpperCase();
       return{
-        ticker:(ticker||'').trim().toUpperCase(),
+        ticker:correctionsMap.get(scrapedTicker)||scrapedTicker,
+        originalTicker:scrapedTicker,
         rawTickerText,
         entry_price:parseFloat(priceStr),
         orig_sl:slMatch?parseFloat(slMatch[1]):null,
@@ -969,7 +1000,7 @@ async function fetchTGTrades(){
       if(existingKeys.has(key)) continue;
       if(dismissedKeys.has(key)){ skippedDismissed++; continue; }
       addParsedItem({
-        ticker:row.ticker, rawTickerText:row.rawTickerText, entry:parseFloat(row.entry_price),
+        ticker:row.ticker, originalTicker:row.originalTicker, rawTickerText:row.rawTickerText, entry:parseFloat(row.entry_price),
         origSl:row.orig_sl?parseFloat(row.orig_sl):null,
         origTgt:row.orig_tgt?parseFloat(row.orig_tgt):null,
         entryDate:row.entry_date, callTimestamp:row.call_timestamp,
@@ -989,6 +1020,7 @@ let parsedUidCounter=0;
 function addParsedItem(p){
   const uid='p'+(++parsedUidCounter);
   p.uid=uid;
+  if(!p.originalTicker) p.originalTicker=p.ticker; // preserve the as-scraped value even if p.ticker gets corrected later
   parsedTrades.push(p);
   const el=document.createElement('div');
   el.className='parsed-item';
@@ -1098,6 +1130,8 @@ async function logAllParsed(){
   for(let i=0;i<total;i++){
     const p=ready[i];
     btn.innerHTML=`<span class="spin"></span>Logging ${i+1}/${total}…`;
+    if(i===0) showProgress(`Logging ${i+1}/${total} trades…`);
+    else updateProgress(`Logging ${i+1}/${total} trades…`);
     const key=tradeDedupeKey(p.ticker,p.entryDate);
     if(existingKeys.has(key)||dismissedKeysForLog.has(key)){
       skippedDup++;
@@ -1123,6 +1157,18 @@ async function logAllParsed(){
         vol_combinations:combosToApiShape(d.combos).map(c=>({...c,stop:c.stop!=null?c.stop/factor:null,target:c.target!=null?c.target/factor:null}))
       });
       existingKeys.add(key); // so a second identical entry later in this SAME batch is also caught
+      // If the ticker got corrected along the way (auto-suggestion accepted,
+      // or manually edited in the review card), persist that mapping now
+      // that it's actually confirmed by a successful log -- this is what
+      // stops the same mangled ticker from resurfacing on every future fetch.
+      // Both sides normalized (suffix-stripped, uppercased) before comparing,
+      // since d.ticker always carries a .NS/.BO suffix that p.originalTicker
+      // never does -- comparing them raw would flag every trade as "corrected".
+      const normalizedOriginal=(p.originalTicker||'').replace(/\.(NS|BO)$/i,'').toUpperCase();
+      const normalizedFinal=(d.ticker||'').replace(/\.(NS|BO)$/i,'').toUpperCase();
+      if(normalizedOriginal&&normalizedOriginal!==normalizedFinal){
+        apiAddTickerCorrection(normalizedOriginal,normalizedFinal).catch(()=>{});
+      }
       success++;
       removeParsedItem(p.uid); // only remove on success -- failures stay in the list for an easy retry
     }catch(e){
@@ -1160,7 +1206,7 @@ async function logAllParsed(){
   if(failures.length){
     console.warn(`logAllParsed: ${failures.length} trade(s) failed —`, failures);
   }
-  toast(`${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate/dismissed skipped`:''}${fail?', '+fail+' failed (see console, left in list to retry)':''}${notReady?`, ${notReady} still need a tag`:''}`,success>0?'ok':(skippedDup&&!fail?'ok':'err'));
+  finishProgress(`✓ ${success} logged${splitAdjusted?`, ${splitAdjusted} split-adjusted`:''}${skippedDup?`, ${skippedDup} duplicate/dismissed skipped`:''}${fail?', '+fail+' failed (see console, left in list to retry)':''}${notReady?`, ${notReady} still need a tag`:''}`);
   btn.disabled=false;
   updateLogAllButton();
   if(!parsedTrades.length){
@@ -1172,9 +1218,11 @@ async function logAllParsed(){
 async function checkSplits(){
   const open=ALL_TRADES.filter(t=>t.state!=='CLOSED');
   if(!open.length){toast('No open trades to check','ok');return;}
-  toast('Checking for splits…','');
+  showProgress(`Checking splits: 0/${open.length}…`);
   let adjusted=0;
-  for(const t of open){
+  for(let i=0;i<open.length;i++){
+    const t=open[i];
+    updateProgress(`Checking splits: ${i+1}/${open.length}…`);
     try{
       const factor=await fetchSplitFactor(t.ticker,t.entry_date||t.call_timestamp.slice(0,10));
       if(factor===1) continue;
@@ -1193,7 +1241,7 @@ async function checkSplits(){
     }catch(e){}
   }
   await refreshAll();
-  toast(adjusted?`${adjusted} trade(s) split-adjusted`:'No splits found','ok');
+  finishProgress(adjusted?`✓ ${adjusted} trade(s) split-adjusted`:'✓ No splits found');
 }
 
 // Finds every trade carrying the midnight-UTC signature left by the old
@@ -1211,32 +1259,87 @@ async function resyncCallTimes(){
 
   const btn=event?.target;
   if(btn){btn.disabled=true;}
-  toast('Fetching corrected TG data…','');
-  let correctedLookup;
+  showProgress('Fetching corrected TG data…');
+  let correctedLookup,rowsByDate;
   try{
     const csvUrl='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv?t='+Date.now();
     const csvText=await (await fetch(csvUrl)).text();
     const lines=csvText.trim().split('\n').filter(l=>l.trim());
     correctedLookup=new Map();
+    // Also indexed by date alone, so an unmatched trade can be checked
+    // against every candidate posted that same day, not just an exact
+    // ticker-string match.
+    rowsByDate=new Map();
     for(const line of lines){
       const parts=line.split(',');
-      const[,ticker,,date,time]=parts;
+      const[,ticker,,date,time,,,,...rest]=parts;
+      const messageText=rest.join(',');
+      const tagInMsg=messageText.match(/#(POSITIONAL|REVERSAL|MOMENTUM|PULLBACK)/i);
+      const afterTagInMsg=tagInMsg?messageText.slice(tagInMsg.index+tagInMsg[0].length):messageText;
+      const buyIdx=afterTagInMsg.search(/BUY\s*(?:ABOVE|AT)/i);
+      const rawTickerText=buyIdx>=0?afterTagInMsg.slice(0,buyIdx).trim():null;
       const ts=csvDateTimeToUtcISOString((date||'').trim(),(time||'').trim());
       if(ts) correctedLookup.set(tradeDedupeKey(ticker,date),ts);
+      const d=(date||'').trim();
+      if(d){
+        if(!rowsByDate.has(d)) rowsByDate.set(d,[]);
+        rowsByDate.get(d).push({scrapedTicker:(ticker||'').trim().toUpperCase(),rawTickerText,ts});
+      }
     }
   }catch(e){
+    operationInProgress=false;
+    hideProgressBanner();
     toast('Could not fetch corrected TG data: '+e.message,'err');
     if(btn) btn.disabled=false;
     return;
   }
+  // A trade may store a CORRECTED ticker (e.g. "ASHOKLEY") that won't match
+  // the CSV, which still has the original scraped text (e.g. "ASHOKLEYLAND")
+  // -- build the reverse mapping so a failed direct match can retry using
+  // the ticker's known original form.
+  const reverseCorrections=new Map();
+  try{
+    const knownCorrections=await apiGetTickerCorrections();
+    for(const c of knownCorrections) reverseCorrections.set(c.corrected,c.original);
+  }catch(e){}
 
-  let fixed=0,notFound=0,alreadyCorrect=0;
+  let fixed=0,notFound=0,alreadyCorrect=0,backfilled=0;
   const notFoundTickers=[];
   for(let i=0;i<affected.length;i++){
     const t=affected[i];
     if(btn) btn.textContent=`⏱ Resyncing ${i+1}/${affected.length}…`;
-    const key=tradeDedupeKey(t.ticker,t.entry_date||t.call_timestamp.slice(0,10));
-    const correctedTs=correctedLookup.get(key);
+    updateProgress(`Resyncing ${i+1}/${affected.length} trades…`);
+    const tDate=t.entry_date||t.call_timestamp.slice(0,10);
+    const tTickerNorm=t.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase();
+    let key=tradeDedupeKey(t.ticker,tDate);
+    let correctedTs=correctedLookup.get(key);
+    if(!correctedTs){
+      const originalTicker=reverseCorrections.get(tTickerNorm);
+      if(originalTicker){
+        const fallbackKey=tradeDedupeKey(originalTicker,tDate);
+        correctedTs=correctedLookup.get(fallbackKey);
+      }
+    }
+    // Still no match -- try every candidate posted the same day, resolving
+    // each one's company name via Yahoo search to see if it lands on this
+    // trade's already-known ticker. No manual re-logging required; if this
+    // finds a match, the correction is persisted automatically too.
+    if(!correctedTs){
+      const candidates=rowsByDate.get(tDate)||[];
+      for(const cand of candidates){
+        if(!cand.rawTickerText) continue;
+        try{
+          const resolved=await resolveTickerViaYahoo(cand.rawTickerText);
+          await new Promise(r=>setTimeout(r,150));
+          if(resolved&&resolved===tTickerNorm){
+            correctedTs=cand.ts;
+            apiAddTickerCorrection(cand.scrapedTicker,tTickerNorm).catch(()=>{});
+            backfilled++;
+            break;
+          }
+        }catch(e){}
+      }
+    }
     if(!correctedTs){ notFound++; notFoundTickers.push(t.ticker); continue; }
     if(correctedTs===t.call_timestamp){ alreadyCorrect++; continue; }
 
@@ -1258,7 +1361,7 @@ async function resyncCallTimes(){
 
   await refreshAll();
   if(notFoundTickers.length) console.warn('Resync: no CSV match found for these tickers (needs manual review):',notFoundTickers);
-  toast(`Resync done: ${fixed} corrected & re-verified, ${alreadyCorrect} already correct, ${notFound} not found in current CSV (see console)`,'ok');
+  finishProgress(`✓ Resync done: ${fixed} corrected & re-verified (${backfilled} via auto-matched company name), ${alreadyCorrect} already correct, ${notFound} not found in current CSV (see console)`);
   if(btn){btn.disabled=false; btn.textContent='⏱ Resync call times';}
 }
 
@@ -1728,10 +1831,56 @@ function exportCSV(type){
   a.download=`volstop_${type}_${new Date().toISOString().split('T')[0]}.csv`; a.click();
 }
 
+let toastTimeoutHandle=null;
 function toast(msg,type=''){
   const el=document.getElementById('toast');
-  el.textContent=msg; el.className='toast show '+(type==='ok'?'ok':type==='err'?'err':'');
-  setTimeout(()=>el.className='toast',3000);
+  clearTimeout(toastTimeoutHandle);
+  const needsDismiss=type==='err';
+  el.className='toast show '+(type==='ok'?'ok':type==='err'?'err':'')+(needsDismiss?' persistent':'');
+  if(needsDismiss){
+    el.innerHTML=`<span>${escapeAttr(msg)}</span><button class="toast-dismiss-btn" onclick="dismissToast()">✕ Dismiss</button>`;
+  }else{
+    el.textContent=msg;
+    const duration=type==='ok'?5000:3000; // success stays a bit longer than a plain in-progress message
+    toastTimeoutHandle=setTimeout(()=>{ el.className='toast'; },duration);
+  }
+}
+function dismissToast(){
+  clearTimeout(toastTimeoutHandle);
+  document.getElementById('toast').className='toast';
+}
+
+// Persistent progress indicator for long-running client-side operations
+// (Resync, batch Log, Check splits) -- unlike toast(), this does NOT
+// auto-hide, stays visible across Open/Closed/Analysis tab switches (it's
+// fixed-position, outside those panels), and requires an explicit dismiss
+// once finished. operationInProgress also drives a real browser-level
+// warning if the tab is closed or reloaded mid-run, since these operations
+// are plain JS loops that genuinely stop if the page unloads.
+let operationInProgress=false;
+window.addEventListener('beforeunload',function(e){
+  if(operationInProgress){
+    e.preventDefault();
+    e.returnValue=''; // browsers show their own generic warning text; custom messages aren't supported anymore
+  }
+});
+function showProgress(text){
+  operationInProgress=true;
+  const banner=document.getElementById('progress-banner');
+  banner.style.display='flex';
+  document.getElementById('progress-banner-text').innerHTML=`<span class="spin"></span>${text}`;
+  document.getElementById('progress-banner-close').style.display='none';
+}
+function updateProgress(text){
+  document.getElementById('progress-banner-text').innerHTML=`<span class="spin"></span>${text}`;
+}
+function finishProgress(text){
+  operationInProgress=false;
+  document.getElementById('progress-banner-text').textContent=text;
+  document.getElementById('progress-banner-close').style.display='inline-block';
+}
+function hideProgressBanner(){
+  document.getElementById('progress-banner').style.display='none';
 }
 
 setSeg('MOMENTUM');
