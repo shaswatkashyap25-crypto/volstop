@@ -9,7 +9,7 @@ import re
 import csv
 import json
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
@@ -19,6 +19,7 @@ SESSION     = os.environ.get('TG_SESSION', '')
 CHANNEL_ID  = int(os.environ.get('TG_CHANNEL_ID', '-1002940195231'))
 OUTPUT_FILE = 'tg_trades.csv'
 STATE_FILE  = 'tg_scraper_state.json'
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # A message is a trade if it carries ANY of these tags. #REVERSAL, #MOMENTUM,
 # and #PULLBACK also tell us the setup type directly — no more guessing/manual
@@ -125,7 +126,7 @@ async def scrape():
             total += 1
             if message.id in existing_ids:
                 continue
-            trade = parse_trade(message.text, message.date.replace(tzinfo=None), message.id)
+            trade = parse_trade(message.text, message.date.astimezone(IST).replace(tzinfo=None), message.id)
             if trade:
                 new_trades.append(trade)
             if message.id > max_id:
