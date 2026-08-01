@@ -861,6 +861,9 @@ function replayBadge(replayError){
   if(partialMatch){
     return ` <span class="replay-progress-badge" title="${escapeAttr(replayError)}">🔄 synced to ${partialMatch[1]}</span>`;
   }
+  if(/tracked via Yahoo fallback/i.test(replayError)){
+    return ` <span class="replay-progress-badge" title="${escapeAttr(replayError)}">ℹ Yahoo fallback</span>`;
+  }
   return ` <span class="replay-err-badge" title="${escapeAttr(replayError)}">⚠ replay failed</span>`;
 }
 // Flags a PENDING trade whose stated holding period has elapsed without
@@ -2227,7 +2230,12 @@ async function manualRecheck(id){
     // The Worker returns HTTP 200 even when the recheck did nothing (e.g. no
     // Fyers token available) — replay_error is the only signal that
     // distinguishes "ran and found nothing new" from "didn't actually run."
-    if(t.replay_error) toast('Recheck ran but did nothing: '+t.replay_error,'err');
+    // But replay_error is also used for informational notes (partial-sync
+    // progress, Yahoo-fallback tracking) on trades that resolved just fine
+    // -- only treat it as a real failure if it isn't one of those.
+    const isInfoNote=t.replay_error && (/^Partially synced up to/.test(t.replay_error) || /tracked via Yahoo fallback/i.test(t.replay_error));
+    if(t.replay_error && !isInfoNote) toast('Recheck ran but did nothing: '+t.replay_error,'err');
+    else if(isInfoNote) toast('Recheck complete — '+t.replay_error,'ok');
     else toast('Recheck complete','ok');
   }catch(e){toast(e.message,'err');}
 }
