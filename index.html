@@ -123,6 +123,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .btn-recheck-tr:hover{border-color:var(--accent);color:var(--accent)}
 .auto-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#1c3a2e;color:var(--green);margin-left:4px}
 .tracking-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#1a2e3d;color:var(--accent);margin-left:4px}
+.modlog-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#2e1a3d;color:#c084fc;margin-left:4px;cursor:help}
 .status-pending{color:var(--muted)}
 .status-open{color:var(--amber)}
 .replay-err-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-family:var(--mono);background:#3d1414;color:var(--red);margin-left:4px;cursor:help}
@@ -855,6 +856,15 @@ function escapeAttr(s){
 // hard failure (invalid symbol, rate limit, etc.) -- both used to render as
 // an identical red "replay failed" badge, which made a trade that's simply
 // mid-sync look just as alarming as one that's genuinely broken.
+function modLogBadge(log){
+  if(!log||!log.length) return '';
+  const summary=log.map(e=>{
+    if(e.field==='outcome_override') return `${e.ts.slice(0,10)}: outcome corrected (${e.old_value.close_reason||'—'}→${e.new_value.close_reason})`;
+    const tag=e.before_trigger?'before trigger':'after trigger';
+    return `${e.ts.slice(0,10)}: ${e.field} ${e.old_value}→${e.new_value} (${tag})`;
+  }).join('\n');
+  return ` <span class="modlog-badge" title="${escapeAttr(summary)}">📝 ${log.length} edit${log.length>1?'s':''}</span>`;
+}
 function replayBadge(replayError){
   if(!replayError) return '';
   const partialMatch=replayError.match(/^Partially synced up to (\S+)/);
@@ -1745,7 +1755,7 @@ function renderTrades(){
     const fv20k2=findCombo(t,'full',20,2);
     return`<tr>
       <td style="color:var(--muted)">${i+1}</td>
-      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}</td>
+      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}${modLogBadge(t.modification_log)}</td>
       <td>${t.entry_date||'—'}</td><td>${t.close_date||'—'}</td>
       <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.close_price)}</td>
       <td class="${cls}">${lr!=null?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
@@ -1821,7 +1831,20 @@ function buildAnalysisData(){
     return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows};
   });
 
-  return{origRows,combos,closedCount:closed.length};
+  const manualExits=closed
+    .filter(t=>t.close_reason==='MANUAL'&&t.entry_price!=null&&t.close_price!=null)
+    .map(t=>{
+      const h=t.hypothetical_orig_outcome;
+      const realRet=logRet(t.entry_price,t.close_price);
+      const hypoRet=(h&&h.state==='CLOSED'&&h.close_price!=null)?logRet(t.entry_price,h.close_price):null;
+      return{
+        ticker:t.ticker, closeDate:t.close_date, realRet,
+        hypoStatus:h?h.state:'PENDING', hypoReason:h?h.close_reason:null, hypoRet,
+        betterThanHolding:(hypoRet!=null)?(realRet>hypoRet):null
+      };
+    });
+
+  return{origRows,combos,closedCount:closed.length,manualExits};
 }
 
 function statsFor(rows){
@@ -1834,12 +1857,38 @@ function statsFor(rows){
 function colorWr(v){return v==='—'?'var(--muted)':(parseFloat(v)>=50?'var(--green)':'var(--red)');}
 function colorRet(v){return v==='—'?'var(--muted)':(parseFloat(v)>=0?'var(--green)':'var(--red)');}
 
+function renderManualExitsBlock(manualExits){
+  if(!manualExits||!manualExits.length) return '';
+  const resolved=manualExits.filter(m=>m.hypoRet!=null);
+  const better=resolved.filter(m=>m.betterThanHolding).length;
+  const worse=resolved.length-better;
+  const rows=manualExits.map(m=>{
+    const hypoLabel=m.hypoStatus!=='CLOSED'?'<span style="color:var(--muted)">still tracking…</span>'
+      :`<span style="color:${m.betterThanHolding?'var(--red)':'var(--green)'}">${m.hypoReason} (${(m.hypoRet*100).toFixed(2)}%)</span>`;
+    const verdict=m.betterThanHolding==null?'—':(m.betterThanHolding?'<span style="color:var(--green)">exit was better</span>':'<span style="color:var(--red)">holding would\'ve been better</span>');
+    return`<tr>
+      <td>${m.ticker}</td><td>${m.closeDate}</td>
+      <td>${(m.realRet*100).toFixed(2)}%</td>
+      <td>${hypoLabel}</td>
+      <td>${verdict}</td>
+    </tr>`;
+  }).join('');
+  return`<div style="margin-bottom:20px;padding:14px;background:var(--s2);border:1px solid var(--border2);border-radius:8px">
+    <div style="font-size:12px;font-weight:600;margin-bottom:4px">Manual exits — did leaving early actually help?</div>
+    ${resolved.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Of ${resolved.length} resolved: <span style="color:var(--green)">${better} exit(s) beat holding</span>, <span style="color:var(--red)">${worse} would've done better held</span>${manualExits.length>resolved.length?` — ${manualExits.length-resolved.length} still tracking`:''}</div>`
+      :`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">All ${manualExits.length} still tracking — the original SL/TGT hasn't resolved yet</div>`}
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+      <th>TICKER</th><th>EXIT DATE</th><th>ACTUAL RETURN</th><th>HAD YOU HELD (orig SL/TGT)</th><th>VERDICT</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+  </div>`;
+}
 function renderAnalysis(){
   const data=buildAnalysisData();
   if(!data.closedCount){
     document.getElementById('analysis-content').innerHTML='<div class="empty">Close some trades to see analysis.</div>';
     return;
   }
+  const manualBlock=renderManualExitsBlock(data.manualExits);
   const subtabs=`<div class="subtabs">
     <button class="subtab ${analysisView==='combos'?'active':''}" onclick="switchAnalysisView('combos')">Combinations</button>
     <button class="subtab ${analysisView==='marginal'?'active':''}" onclick="switchAnalysisView('marginal')">Marginal Effects</button>
@@ -1849,7 +1898,7 @@ function renderAnalysis(){
   if(analysisView==='combos') body=renderCombosView(data);
   else if(analysisView==='marginal') body=renderMarginalView(data);
   else body=renderInteractionView(data);
-  document.getElementById('analysis-content').innerHTML=subtabs+body;
+  document.getElementById('analysis-content').innerHTML=manualBlock+subtabs+body;
 }
 
 function switchAnalysisView(v){
@@ -2053,15 +2102,24 @@ function openEdit(id){
 // underlying call was right but the recorded exit itself needs a fix.
 async function confirmOutcomeOverride(){
   if(!editingId) return;
+  const t=ALL_TRADES.find(x=>x.id===editingId);
   const reason=document.getElementById('e-exit-reason').value;
   const isNotTriggered=reason==='NOT_TRIGGERED';
   const ep=parseFloat(document.getElementById('e-exit-price').value);
   const ed=document.getElementById('e-exit-date').value;
   if(!isNotTriggered&&(!ep||!ed)){toast('Fill exit price and date','err');return;}
   try{
+    // #24 -- outcome-override edits are always logged, no before/after-
+    // trigger distinction needed since this only ever applies to an
+    // already-closed trade correcting an already-recorded result.
+    const logEntry={
+      ts:new Date().toISOString(), field:'outcome_override',
+      old_value:{close_price:t.close_price,close_date:t.close_date,close_reason:t.close_reason},
+      new_value:{close_price:isNotTriggered?null:ep,close_date:isNotTriggered?(ed||new Date().toISOString().slice(0,10)):ed,close_reason:reason}
+    };
     const patch=isNotTriggered
-      ?{close_price:null,close_date:ed||new Date().toISOString().slice(0,10),close_reason:reason,auto_closed:false}
-      :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false};
+      ?{close_price:null,close_date:ed||new Date().toISOString().slice(0,10),close_reason:reason,auto_closed:false,modification_log:[...(t.modification_log||[]),logEntry]}
+      :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false,modification_log:[...(t.modification_log||[]),logEntry]};
     await apiUpdateTrade(editingId,patch);
     closeModal('modal-edit'); await refreshAll();
     toast('Outcome corrected ✓','ok');
@@ -2096,6 +2154,15 @@ async function confirmEdit(){
   btn.disabled=true; btn.textContent='Recalculating…';
   try{
     const newCallTimestamp=csvDateTimeToUtcISOString(newDate,newTime);
+    // #24 -- log entry price / SL / TGT changes only, with a before/after
+    // trigger tag. Ticker/setup/publish-time are deliberately excluded --
+    // those are data hygiene, not edits to the trade's actual thesis.
+    const wasTriggered=t.state!=='PENDING';
+    const newLogEntries=[];
+    const nowIso=new Date().toISOString();
+    if(t.buy_above!==newPrice) newLogEntries.push({ts:nowIso,field:'entry_price',old_value:t.buy_above,new_value:newPrice,before_trigger:!wasTriggered});
+    if((t.orig_sl??null)!==newSl) newLogEntries.push({ts:nowIso,field:'orig_sl',old_value:t.orig_sl,new_value:newSl,before_trigger:!wasTriggered});
+    if((t.orig_tgt??null)!==newTgt) newLogEntries.push({ts:nowIso,field:'orig_tgt',old_value:t.orig_tgt,new_value:newTgt,before_trigger:!wasTriggered});
     // Entry price is changing — stop/target = entry * exp(±k*vol/√252), so
     // they must be recomputed from scratch, not left at whatever they were
     // under the old entry price. Vol% itself barely moves over a few days,
@@ -2110,6 +2177,7 @@ async function confirmEdit(){
       orig_tgt:newTgt,
       vol_annualized:d.vol_annualized,
       vol_combinations:comboSkeleton(d.combos),
+      modification_log:[...(t.modification_log||[]),...newLogEntries],
       // Full reset -- same fields Resync clears, same reason: a trade's
       // trigger/close outcome depends entirely on when it's checked FROM.
       // Leaving any of this in place risks the sweep resuming past the
