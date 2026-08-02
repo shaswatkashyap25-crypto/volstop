@@ -2132,7 +2132,24 @@ async function confirmOutcomeOverride(){
     const patch=isNotTriggered
       ?{close_price:null,close_date:ed||new Date().toISOString().slice(0,10),close_reason:reason,auto_closed:false,modification_log:[...(t.modification_log||[]),logEntry]}
       :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false,modification_log:[...(t.modification_log||[]),logEntry]};
+    if(reason==='MANUAL'){
+      // Switching to MANUAL introduces a NEW need to track the hypothetical
+      // original-outcome -- but the historical window (where the real
+      // answer already lives, since that's what determined the ORIGINAL
+      // close_reason before this override) is already marked as "swept."
+      // Without resetting the checkpoint, the sweep only ever looks
+      // forward from here, and for an already-delisted/inactive stock
+      // there's no forward data left -- it'd stay "still tracking" forever
+      // despite the answer already existing in the past. Resetting is safe:
+      // the main state and every already-CLOSED combo are untouched on
+      // re-walk (they're only modified while still OPEN), so this only
+      // actually affects the hypothetical tracking and any genuinely
+      // unresolved combos.
+      patch.last_swept_date=null;
+      patch.hypothetical_orig_outcome={state:'PENDING',close_reason:null,close_date:null,close_price:null};
+    }
     await apiUpdateTrade(editingId,patch);
+    if(reason==='MANUAL') await apiRecheckTrade(editingId).catch(()=>{});
     closeModal('modal-edit'); await refreshAll();
     toast('Outcome corrected ✓','ok');
   }catch(e){toast(e.message,'err');}
