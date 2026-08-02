@@ -2118,20 +2118,25 @@ async function confirmOutcomeOverride(){
   const ed=document.getElementById('e-exit-date').value;
   if(!isNotTriggered&&(!ep||!ed)){toast('Fill exit price and date','err');return;}
   try{
-    // #24 -- outcome-override edits are always logged, no before/after-
-    // trigger distinction needed since this only ever applies to an
-    // already-closed trade correcting an already-recorded result.
+    // #24 -- only log if the outcome genuinely changed. A re-save with
+    // identical values (e.g. purely to re-trigger tracking after a fix,
+    // not an actual new decision) shouldn't create a log entry implying a
+    // second correction happened.
     const occCorrectionDate=document.getElementById('e-outcome-correction-date').value;
     const occCorrectionTime=document.getElementById('e-outcome-correction-time').value||'09:15';
     const occCorrectionTs=csvDateTimeToUtcISOString(occCorrectionDate,occCorrectionTime)||new Date().toISOString();
+    const newClosePrice=isNotTriggered?null:ep;
+    const newCloseDate=isNotTriggered?(ed||new Date().toISOString().slice(0,10)):ed;
+    const actuallyChanged=(t.close_price??null)!==(newClosePrice??null)||(t.close_date??null)!==(newCloseDate??null)||(t.close_reason??null)!==reason;
     const logEntry={
       ts:occCorrectionTs, field:'outcome_override',
       old_value:{close_price:t.close_price,close_date:t.close_date,close_reason:t.close_reason},
-      new_value:{close_price:isNotTriggered?null:ep,close_date:isNotTriggered?(ed||new Date().toISOString().slice(0,10)):ed,close_reason:reason}
+      new_value:{close_price:newClosePrice,close_date:newCloseDate,close_reason:reason}
     };
     const patch=isNotTriggered
-      ?{close_price:null,close_date:ed||new Date().toISOString().slice(0,10),close_reason:reason,auto_closed:false,modification_log:[...(t.modification_log||[]),logEntry]}
-      :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false,modification_log:[...(t.modification_log||[]),logEntry]};
+      ?{close_price:null,close_date:newCloseDate,close_reason:reason,auto_closed:false}
+      :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false};
+    if(actuallyChanged) patch.modification_log=[...(t.modification_log||[]),logEntry];
     if(reason==='MANUAL'){
       // Switching to MANUAL introduces a NEW need to track the hypothetical
       // original-outcome -- but the historical window (where the real
