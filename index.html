@@ -1357,6 +1357,8 @@ async function logAllParsed(){
   const existingByKey=new Map(existing.map(t=>[tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10)),t]));
   const dismissedForLog=await apiGetDismissed().catch(()=>[]);
   const dismissedKeysForLog=new Set(dismissedForLog.map(d=>d.key));
+  const knownCorrectionsForLog=await apiGetTickerCorrections().catch(()=>[]);
+  const correctionsMapForLog=new Map(knownCorrectionsForLog.map(c=>[c.original,c.corrected]));
   const conflictingTags=[]; // trades where someone's local tag choice differed from what actually got saved
   for(let i=0;i<total;i++){
     const p=ready[i];
@@ -1364,8 +1366,12 @@ async function logAllParsed(){
     if(i===0) showProgress(`Logging ${i+1}/${total} trades…`);
     else updateProgress(`Logging ${i+1}/${total} trades…`);
     const key=tradeDedupeKey(p.ticker,p.entryDate);
-    const existingMatch=existingByKey.get(key);
-    if(existingMatch||dismissedKeysForLog.has(key)){
+    const origKey=p.originalTicker&&p.originalTicker!==p.ticker?tradeDedupeKey(p.originalTicker,p.entryDate):null;
+    const knownCorrectedForLog=correctionsMapForLog.get((p.ticker||'').replace(/\.(NS|BO)$/i,'').toUpperCase());
+    const correctedKeyForLog=knownCorrectedForLog?tradeDedupeKey(knownCorrectedForLog,p.entryDate):null;
+    const existingMatch=existingByKey.get(key)||(origKey&&existingByKey.get(origKey))||(correctedKeyForLog&&existingByKey.get(correctedKeyForLog));
+    const isDismissed=dismissedKeysForLog.has(key)||(origKey&&dismissedKeysForLog.has(origKey))||(correctedKeyForLog&&dismissedKeysForLog.has(correctedKeyForLog));
+    if(existingMatch||isDismissed){
       skippedDup++;
       if(existingMatch&&p.setup&&existingMatch.setup_type&&p.setup!==existingMatch.setup_type){
         conflictingTags.push(`${p.ticker}: you had "${p.setup}", already logged as "${existingMatch.setup_type}"`);
