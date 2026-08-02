@@ -1147,7 +1147,17 @@ async function fetchTGTrades(){
     const dismissedItems=await apiGetDismissed().catch(()=>[]);
     const dismissedKeys=new Set(dismissedItems.map(d=>d.key));
     let added=0, skippedDismissed=0;
-    const localKeys=new Set(parsedTrades.map(p=>tradeDedupeKey(p.ticker,p.entryDate)));
+    // Check both the current (possibly corrected) ticker AND the original
+    // as-scraped ticker for each existing item -- a fresh CSV re-fetch
+    // produces candidates using the raw uncorrected text (the CSV file
+    // itself never gets updated), so comparing only against the current
+    // ticker would miss that an already-corrected item and its freshly
+    // refetched raw-name duplicate are actually the same trade.
+    const localKeys=new Set();
+    parsedTrades.forEach(p=>{
+      localKeys.add(tradeDedupeKey(p.ticker,p.entryDate));
+      if(p.originalTicker&&p.originalTicker!==p.ticker) localKeys.add(tradeDedupeKey(p.originalTicker,p.entryDate));
+    });
     for(const row of rows){
       if(!row.ticker||!row.entry_price) continue;
       const key=tradeDedupeKey(row.ticker,row.entry_date);
@@ -1247,10 +1257,18 @@ async function syncReviewList(){
     const freshKeys=new Set(fresh.map(t=>tradeDedupeKey(t.ticker,t.call_timestamp?.slice(0,10))));
     const dismissedItems=await apiGetDismissed().catch(()=>[]);
     const dismissedKeys=new Set(dismissedItems.map(d=>d.key));
+    const knownCorrections=await apiGetTickerCorrections().catch(()=>[]);
+    const correctionsMap=new Map(knownCorrections.map(c=>[c.original,c.corrected]));
     let removed=0;
     for(const p of [...parsedTrades]){
       const key=tradeDedupeKey(p.ticker,p.entryDate);
-      if(freshKeys.has(key)||dismissedKeys.has(key)){
+      const origKey=p.originalTicker&&p.originalTicker!==p.ticker?tradeDedupeKey(p.originalTicker,p.entryDate):null;
+      // A raw/uncorrected card doesn't know on its own that a DIFFERENT
+      // card's correction to this same ticker already got logged -- check
+      // the persisted correction mapping too.
+      const knownCorrected=correctionsMap.get((p.ticker||'').replace(/\.(NS|BO)$/i,'').toUpperCase());
+      const correctedKey=knownCorrected?tradeDedupeKey(knownCorrected,p.entryDate):null;
+      if(freshKeys.has(key)||dismissedKeys.has(key)||(origKey&&(freshKeys.has(origKey)||dismissedKeys.has(origKey)))||(correctedKey&&freshKeys.has(correctedKey))){
         removeParsedItem(p.uid);
         removed++;
       }
