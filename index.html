@@ -1283,6 +1283,16 @@ async function dismissParsedItem(uid){
   try{
     const key=item.ticker.replace(/\.(NS|BO)$/i,'').toUpperCase();
     await apiAddDismissed(key,item.entryDate);
+    // Persist any correction that was already found for this item, even
+    // though it's being dismissed rather than logged -- dismissing means
+    // "I've confirmed this is right, I just don't want to log it," not
+    // "reject the ticker fix." Without this, the correction only ever
+    // existed in this browser session and gets rediscovered from scratch
+    // on every future fetch.
+    const normalizedOriginal=(item.originalTicker||'').replace(/\.(NS|BO)$/i,'').toUpperCase();
+    if(normalizedOriginal&&normalizedOriginal!==key){
+      apiAddTickerCorrection(normalizedOriginal,key).catch(()=>{});
+    }
     removeParsedItem(uid);
     toast(`${item.ticker} dismissed — won't be suggested again`,'ok');
   }catch(e){toast(e.message,'err');}
