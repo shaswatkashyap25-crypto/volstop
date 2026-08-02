@@ -2352,12 +2352,24 @@ function exportCSV(type){
   if(!trades.length){toast('Nothing to export','err');return;}
   // Flatten vol_combinations into columns so the CSV stays portable.
   const flat=trades.map(t=>{
+    const log=t.modification_log||[];
+    // No commas anywhere in this text -- this export doesn't do CSV
+    // quoting/escaping, so a stray comma would silently break column
+    // alignment for every row after it.
+    const modSummary=log.map(e=>{
+      if(e.field==='outcome_override') return `${e.ts.slice(0,10)}: outcome corrected (${e.old_value.close_reason||'none'} -> ${e.new_value.close_reason})`;
+      const tag=e.before_trigger?'before trigger':'after trigger';
+      return `${e.ts.slice(0,10)}: ${e.field} ${e.old_value} -> ${e.new_value} (${tag})`;
+    }).join(' | ');
+    const h=t.hypothetical_orig_outcome;
     const row={
       id:t.id, ticker:t.ticker, setup_type:t.setup_type, buy_above:t.buy_above,
       orig_sl:t.orig_sl, orig_tgt:t.orig_tgt, call_timestamp:t.call_timestamp,
       entry_date:t.entry_date, entry_price:t.entry_price, state:t.state,
       close_reason:t.close_reason, close_date:t.close_date, close_price:t.close_price,
-      auto_closed:t.auto_closed, vol_monitoring_active:t.vol_monitoring_active
+      auto_closed:t.auto_closed, vol_monitoring_active:t.vol_monitoring_active,
+      modification_count:log.length, modification_summary:modSummary,
+      hypothetical_orig_state:h?h.state:'', hypothetical_orig_reason:h?h.close_reason:'', hypothetical_orig_close_price:h?h.close_price:''
     };
     (t.vol_combinations||[]).forEach(c=>{
       const pre=`${c.vol_type==='full'?'fv':'dv'}_${c.lookback}_k${String(c.k).replace('.','_')}`;
