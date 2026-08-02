@@ -390,6 +390,8 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
           <option value="PULLBACK">Pullback</option>
         </select>
       </div>
+      <div class="field"><label>CORRECTION DATE (when you actually made this edit)</label><input id="e-correction-date" type="date"/></div>
+      <div class="field"><label>CORRECTION TIME (IST)</label><input id="e-correction-time" type="time"/></div>
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-edit')">Cancel</button>
@@ -410,6 +412,8 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
             <option value="NOT_TRIGGERED">Not triggered</option>
           </select>
         </div>
+        <div class="field"><label>CORRECTION DATE (when you actually made this correction)</label><input id="e-outcome-correction-date" type="date"/></div>
+        <div class="field"><label>CORRECTION TIME (IST)</label><input id="e-outcome-correction-time" type="time"/></div>
       </div>
       <button class="btn-confirm-accent" style="width:100%" onclick="confirmOutcomeOverride()">Save outcome only</button>
     </div>
@@ -2084,6 +2088,9 @@ function openEdit(id){
   document.getElementById('e-date').value=date||t.entry_date||'';
   document.getElementById('e-time').value=time||'09:15';
   document.getElementById('e-setup').value=t.setup_type;
+  const{date:nowDate,time:nowTime}=utcIsoToIstParts(new Date().toISOString());
+  document.getElementById('e-correction-date').value=nowDate;
+  document.getElementById('e-correction-time').value=nowTime;
 
   const outcomeSection=document.getElementById('e-outcome-section');
   if(t.state==='CLOSED'){
@@ -2091,6 +2098,8 @@ function openEdit(id){
     document.getElementById('e-exit-price').value=t.close_price??'';
     document.getElementById('e-exit-date').value=t.close_date??'';
     document.getElementById('e-exit-reason').value=t.close_reason||'MANUAL';
+    document.getElementById('e-outcome-correction-date').value=nowDate;
+    document.getElementById('e-outcome-correction-time').value=nowTime;
   }else{
     outcomeSection.style.display='none';
   }
@@ -2112,8 +2121,11 @@ async function confirmOutcomeOverride(){
     // #24 -- outcome-override edits are always logged, no before/after-
     // trigger distinction needed since this only ever applies to an
     // already-closed trade correcting an already-recorded result.
+    const occCorrectionDate=document.getElementById('e-outcome-correction-date').value;
+    const occCorrectionTime=document.getElementById('e-outcome-correction-time').value||'09:15';
+    const occCorrectionTs=csvDateTimeToUtcISOString(occCorrectionDate,occCorrectionTime)||new Date().toISOString();
     const logEntry={
-      ts:new Date().toISOString(), field:'outcome_override',
+      ts:occCorrectionTs, field:'outcome_override',
       old_value:{close_price:t.close_price,close_date:t.close_date,close_reason:t.close_reason},
       new_value:{close_price:isNotTriggered?null:ep,close_date:isNotTriggered?(ed||new Date().toISOString().slice(0,10)):ed,close_reason:reason}
     };
@@ -2159,10 +2171,12 @@ async function confirmEdit(){
     // those are data hygiene, not edits to the trade's actual thesis.
     const wasTriggered=t.state!=='PENDING';
     const newLogEntries=[];
-    const nowIso=new Date().toISOString();
-    if(t.buy_above!==newPrice) newLogEntries.push({ts:nowIso,field:'entry_price',old_value:t.buy_above,new_value:newPrice,before_trigger:!wasTriggered});
-    if((t.orig_sl??null)!==newSl) newLogEntries.push({ts:nowIso,field:'orig_sl',old_value:t.orig_sl,new_value:newSl,before_trigger:!wasTriggered});
-    if((t.orig_tgt??null)!==newTgt) newLogEntries.push({ts:nowIso,field:'orig_tgt',old_value:t.orig_tgt,new_value:newTgt,before_trigger:!wasTriggered});
+    const correctionDate=document.getElementById('e-correction-date').value;
+    const correctionTime=document.getElementById('e-correction-time').value||'09:15';
+    const correctionTs=csvDateTimeToUtcISOString(correctionDate,correctionTime)||new Date().toISOString();
+    if(t.buy_above!==newPrice) newLogEntries.push({ts:correctionTs,field:'entry_price',old_value:t.buy_above,new_value:newPrice,before_trigger:!wasTriggered});
+    if((t.orig_sl??null)!==newSl) newLogEntries.push({ts:correctionTs,field:'orig_sl',old_value:t.orig_sl,new_value:newSl,before_trigger:!wasTriggered});
+    if((t.orig_tgt??null)!==newTgt) newLogEntries.push({ts:correctionTs,field:'orig_tgt',old_value:t.orig_tgt,new_value:newTgt,before_trigger:!wasTriggered});
     // Entry price is changing — stop/target = entry * exp(±k*vol/√252), so
     // they must be recomputed from scratch, not left at whatever they were
     // under the old entry price. Vol% itself barely moves over a few days,
