@@ -2362,6 +2362,8 @@ async function undoDismiss(key){
   }catch(e){toast(e.message,'err');}
 }
 async function manualRecheck(id){
+  const btn=event?.target;
+  if(btn){ if(btn.disabled) return; btn.disabled=true; btn.dataset.origText=btn.textContent; btn.textContent='Rechecking…'; }
   toast('Rechecking against latest prices…','');
   try{
     const t=await apiRecheckTrade(id);
@@ -2376,7 +2378,10 @@ async function manualRecheck(id){
     if(t.replay_error && !isInfoNote) toast('Recheck ran but did nothing: '+t.replay_error,'err');
     else if(isInfoNote) toast('Recheck complete — '+t.replay_error,'ok');
     else toast('Recheck complete','ok');
-  }catch(e){toast(e.message,'err');}
+  }catch(e){
+    toast(e.message,'err');
+    if(btn){ btn.disabled=false; btn.textContent=btn.dataset.origText||'Recheck'; }
+  }
 }
 function closeModal(id){
   document.getElementById(id).classList.remove('show');
