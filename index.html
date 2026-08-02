@@ -1802,6 +1802,7 @@ function renderTrades(){
       <td><span class="badge badge-${setupCls(t.setup_type)}">${t.setup_type}</span></td>
       <td style="font-size:10px;color:var(--muted)">${t.close_reason||'—'}</td>
       <td>
+        ${t.vol_monitoring_active?`<button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>`:''}
         <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
         <button class="btn-del-tr" onclick="delTrade('${t.id}')">Del</button>
       </td>
