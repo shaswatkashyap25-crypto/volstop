@@ -34,6 +34,18 @@
   --accent:#0284c7;--accent2:#6366f1;
   --green:#059669;--amber:#d97706;--red:#dc2626;
 }
+[data-theme="light"] .badge-mom{background:#d1fae5}
+[data-theme="light"] .badge-rev{background:#ede9fe}
+[data-theme="light"] .badge-pull{background:#fef3c7}
+[data-theme="light"] .auto-badge{background:#d1fae5}
+[data-theme="light"] .tracking-badge{background:#dbeafe}
+[data-theme="light"] .modlog-badge{background:#f3e8ff;color:#9333ea}
+[data-theme="light"] .replay-err-badge{background:#fee2e2}
+[data-theme="light"] .replay-progress-badge{background:#dbeafe}
+[data-theme="light"] .history-note{background:#fef3c7;border-color:#fde68a}
+[data-theme="light"] .pill-dv{background:#fef3c7}
+[data-theme="light"] .action-btn:hover{background:#fef3c7}
+[data-theme="light"] .expiry-badge{background:#e2e8f0}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;min-height:100vh}
 header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:14px}
 .logo{width:30px;height:30px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:500;color:#0d0f12}
@@ -193,9 +205,9 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 
 <div class="layout">
 <aside class="sidebar" id="sidebar-scroll">
-<div style="position:fixed;left:8px;bottom:70px;z-index:50;display:flex;flex-direction:column;gap:4px">
-  <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:0,behavior:'smooth'})" style="width:28px;height:28px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:5px;cursor:pointer;font-size:12px" title="Jump to top">↑</button>
-  <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:document.getElementById('sidebar-scroll').scrollHeight,behavior:'smooth'})" style="width:28px;height:28px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:5px;cursor:pointer;font-size:12px" title="Jump to bottom">↓</button>
+<div style="position:fixed;left:366px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:3px;opacity:.55" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">
+  <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:0,behavior:'smooth'})" style="width:22px;height:22px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:4px;cursor:pointer;font-size:10px;padding:0" title="Jump to top">↑</button>
+  <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:document.getElementById('sidebar-scroll').scrollHeight,behavior:'smooth'})" style="width:22px;height:22px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:4px;cursor:pointer;font-size:10px;padding:0" title="Jump to bottom">↓</button>
 </div>
   <div>
     <div class="mode-tabs">
