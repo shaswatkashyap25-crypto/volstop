@@ -4,6 +4,18 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>VolStop — Forward Test Logger</title>
+<script>
+// Applied synchronously, before the stylesheet renders anything, so there's
+// no flash of the wrong theme. localStorage is browser-local by nature --
+// this choice never syncs anywhere, so it only ever affects this one
+// browser/session, never a colleague's.
+(function(){
+  try{
+    const saved=localStorage.getItem('volstop_theme');
+    if(saved==='light') document.documentElement.setAttribute('data-theme','light');
+  }catch(e){}
+})();
+</script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -14,6 +26,13 @@
   --accent:#38bdf8;--accent2:#818cf8;
   --green:#34d399;--amber:#fbbf24;--red:#f87171;
   --mono:'IBM Plex Mono',monospace;--sans:'IBM Plex Sans',sans-serif;
+}
+[data-theme="light"]{
+  --bg:#f8fafc;--s1:#ffffff;--s2:#f1f5f9;
+  --border:#e2e8f0;--border2:#cbd5e1;
+  --text:#1e293b;--muted:#64748b;
+  --accent:#0284c7;--accent2:#6366f1;
+  --green:#059669;--amber:#d97706;--red:#dc2626;
 }
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.6;min-height:100vh}
 header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:14px}
@@ -105,7 +124,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 .exp-btn:hover{color:var(--text)}
 .action-btn{font-size:11px;font-family:var(--mono);padding:5px 12px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--amber);cursor:pointer;margin-left:auto}
 .action-btn:hover{background:#2e2514}
-.tbl-wrap{overflow-x:auto}
+.tbl-wrap{overflow-x:auto;overflow-y:visible}
 .tbl{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap;font-family:var(--mono)}
 .tbl th{text-align:left;padding:7px 9px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border);background:var(--s1);letter-spacing:.5px;position:sticky;top:0}
 .tbl th.sortable{cursor:pointer;user-select:none}
@@ -169,11 +188,15 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 <header>
   <div class="logo">σ</div>
   <span class="logo-text">VolStop</span>
-  <span class="logo-sub"><span class="conn-dot" id="conn-dot"></span><span id="conn-text">connecting…</span></span>
+  <span class="logo-sub"><button id="theme-toggle" onclick="toggleTheme()" style="background:var(--s2);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:5px;cursor:pointer" title="Toggle light/dark (only affects your own view)">◐ theme</button><span class="conn-dot" id="conn-dot"></span><span id="conn-text">connecting…</span></span>
 </header>
 
 <div class="layout">
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar-scroll">
+<div style="position:fixed;left:8px;bottom:70px;z-index:50;display:flex;flex-direction:column;gap:4px">
+  <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:0,behavior:'smooth'})" style="width:28px;height:28px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:5px;cursor:pointer;font-size:12px" title="Jump to top">↑</button>
+  <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:document.getElementById('sidebar-scroll').scrollHeight,behavior:'smooth'})" style="width:28px;height:28px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:5px;cursor:pointer;font-size:12px" title="Jump to bottom">↓</button>
+</div>
   <div>
     <div class="mode-tabs">
       <div class="mode-tab active" id="mode-single" onclick="switchMode('single')">Single Trade</div>
@@ -251,7 +274,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
   </div>
 </aside>
 
-<main class="main">
+<main class="main" id="main-scroll">
+<div style="position:fixed;right:14px;bottom:14px;z-index:50;display:flex;flex-direction:column;gap:4px">
+  <button onclick="document.getElementById('main-scroll').scrollTo({top:0,behavior:'smooth'})" style="width:30px;height:30px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:6px;cursor:pointer;font-size:13px" title="Jump to top">↑</button>
+  <button onclick="document.getElementById('main-scroll').scrollTo({top:document.getElementById('main-scroll').scrollHeight,behavior:'smooth'})" style="width:30px;height:30px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:6px;cursor:pointer;font-size:13px" title="Jump to bottom">↓</button>
+</div>
   <div class="tabs">
     <div class="tab active" onclick="swTab('open',this)">Open trades</div>
     <div class="tab" onclick="swTab('closed',this)">Closed trades</div>
@@ -468,6 +495,10 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <button class="exp-btn" onclick="copyDismissedToClipboard()" style="flex:1">⧉ Copy</button>
       <button class="exp-btn" onclick="exportDismissedCSV()" style="flex:1">Export CSV</button>
     </div>
+    <div style="display:flex;justify-content:flex-end;gap:4px;margin-bottom:4px">
+      <button onclick="document.getElementById('dismissed-list').scrollTo({top:0,behavior:'smooth'})" style="width:26px;height:26px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:5px;cursor:pointer;font-size:11px" title="Jump to top">↑</button>
+      <button onclick="document.getElementById('dismissed-list').scrollTo({top:document.getElementById('dismissed-list').scrollHeight,behavior:'smooth'})" style="width:26px;height:26px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:5px;cursor:pointer;font-size:11px" title="Jump to bottom">↓</button>
+    </div>
     <div id="dismissed-list" style="display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto"></div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-dismissed')" style="flex:1">Close</button>
@@ -482,6 +513,18 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 <div class="toast" id="toast"></div>
 
 <script>
+// Flips the theme and persists the choice -- localStorage is browser-local,
+// so this never syncs to a colleague, only ever affects this one session.
+function toggleTheme(){
+  const isLight=document.documentElement.getAttribute('data-theme')==='light';
+  if(isLight){
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('volstop_theme','dark');
+  }else{
+    document.documentElement.setAttribute('data-theme','light');
+    localStorage.setItem('volstop_theme','light');
+  }
+}
 const LBS=[20,60,252], KS=[1,1.5,2,2.5,3,4,5];
 // Single source of truth for setup types. Each has a CSS suffix (used for
 // both .badge-X and .seg button.on-X) and a short label for the Analysis
@@ -1916,7 +1959,7 @@ function renderManualExitsBlock(manualExits){
     <div style="font-size:12px;font-weight:600;margin-bottom:4px">Manual exits — did leaving early actually help?</div>
     ${resolved.length?`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Of ${resolved.length} resolved: <span style="color:var(--green)">${better} exit(s) beat holding</span>, <span style="color:var(--red)">${worse} would've done better held</span>${manualExits.length>resolved.length?` — ${manualExits.length-resolved.length} still tracking`:''}</div>`
       :`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">All ${manualExits.length} still tracking — the original SL/TGT hasn't resolved yet</div>`}
-    <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr>
       <th>TICKER</th><th>EXIT DATE</th><th>ACTUAL RETURN</th><th>HAD YOU HELD (orig SL/TGT)</th><th>VERDICT</th>
     </tr></thead><tbody>${rows}</tbody></table></div>
   </div>`;
@@ -1964,7 +2007,7 @@ function renderCombosView(data){
     });
     return`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">${cells}</tr>`;
   }
-  let html=`<div style="overflow-x:auto"><table class="tbl"><thead><tr>
+  let html=`<div class="tbl-wrap"><table class="tbl"><thead><tr>
     <th>COMBINATION</th>
     <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
     <th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
@@ -1986,7 +2029,7 @@ function renderMarginalView(data){
       if(!groups[key]) groups[key]=[];
       groups[key].push(...c.rows);
     });
-    let html=`<div class="grid-title">${title}</div><div style="overflow-x:auto"><table class="tbl"><thead><tr>
+    let html=`<div class="grid-title">${title}</div><div class="tbl-wrap"><table class="tbl"><thead><tr>
       <th>VALUE</th><th>WIN%</th><th>AVG RET</th><th>N</th><th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
     </tr></thead><tbody>`;
     groupLabels.forEach(g=>{
@@ -2027,7 +2070,7 @@ function renderInteractionView(data){
         groups[key][st].push(...c.rows.filter(r=>r.setup===st));
       });
     });
-    let html=`<div class="grid-title">${title}</div><div style="overflow-x:auto"><table class="tbl"><thead><tr>
+    let html=`<div class="grid-title">${title}</div><div class="tbl-wrap"><table class="tbl"><thead><tr>
       <th>VALUE</th>
       ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — WIN%</th><th>${s.short} — AVG RET</th><th>${s.short} — N</th>`).join('')}
     </tr></thead><tbody>`;
