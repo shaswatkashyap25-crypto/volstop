@@ -206,6 +206,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 <div class="layout">
 <aside class="sidebar" id="sidebar-scroll">
 <div style="position:fixed;left:366px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:3px;opacity:.55" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">
+  <button onclick="toggleReviewListVisibility()" id="btn-toggle-review-list-fixed" style="width:22px;height:22px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:4px;cursor:pointer;font-size:11px;padding:0" title="Collapse/show review list">▾</button>
   <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:0,behavior:'smooth'})" style="width:22px;height:22px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:4px;cursor:pointer;font-size:10px;padding:0" title="Jump to top">↑</button>
   <button onclick="document.getElementById('sidebar-scroll').scrollTo({top:document.getElementById('sidebar-scroll').scrollHeight,behavior:'smooth'})" style="width:22px;height:22px;background:var(--s2);border:1px solid var(--border2);color:var(--muted);border-radius:4px;cursor:pointer;font-size:10px;padding:0" title="Jump to bottom">↓</button>
 </div>
@@ -281,7 +282,6 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <button class="btn-sec" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
     <button class="exp-btn" style="width:100%" onclick="openDismissedModal()">Manage dismissed trades</button>
     <button class="exp-btn" style="width:100%" onclick="syncReviewList()" title="Remove items from this list that someone else has already logged or dismissed">⟳ Sync review list</button>
-    <button class="exp-btn" style="width:100%" id="btn-toggle-review-list" onclick="toggleReviewListVisibility()">▾ Collapse review list</button>
     <div id="parsed-list"></div>
     <button class="btn-main" id="btn-log-all" style="display:none" onclick="logAllParsed()">↓ Log all trades</button>
   </div>
@@ -1359,22 +1359,23 @@ async function dismissParsedItem(uid){
 
 function updateLogAllButton(){
   const btn=document.getElementById('btn-log-all');
-  const toggleBtn=document.getElementById('btn-toggle-review-list');
+  const toggleBtn=document.getElementById('btn-toggle-review-list-fixed');
   if(!parsedTrades.length){ btn.style.display='none'; toggleBtn.style.display='none'; return; }
   btn.style.display='block';
   toggleBtn.style.display='block';
   const list=document.getElementById('parsed-list');
-  if(list.style.display==='none') toggleBtn.textContent=`▸ Show review list (${parsedTrades.length})`;
+  if(list.style.display==='none') toggleBtn.title=`Show review list (${parsedTrades.length})`;
   btn.innerHTML=`↓ Log ${parsedTrades.length} trade${parsedTrades.length>1?'s':''}`;
 }
 
 
 function toggleReviewListVisibility(){
   const list=document.getElementById('parsed-list');
-  const btn=document.getElementById('btn-toggle-review-list');
+  const btn=document.getElementById('btn-toggle-review-list-fixed');
   const isHidden=list.style.display==='none';
   list.style.display=isHidden?'':'none';
-  btn.textContent=isHidden?'▾ Collapse review list':`▸ Show review list (${parsedTrades.length})`;
+  btn.textContent=isHidden?'▾':'▸';
+  btn.title=isHidden?'Collapse review list':`Show review list (${parsedTrades.length})`;
 }
 function setParsedSetup(uid,val){
   const item=parsedTrades.find(x=>x.uid===uid);
@@ -1950,7 +1951,7 @@ function buildAnalysisData(){
     const avgRetInclExpired=allRowsInclExpired.length
       ?(allRowsInclExpired.reduce((s,r)=>s+(r.ret||0),0)/allRowsInclExpired.length*100).toFixed(2)+'%'
       :'—';
-    return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows,avgRetInclExpired,expiredCount:expiredRows.length};
+    return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows,expiredRows,avgRetInclExpired,expiredCount:expiredRows.length};
   });
 
   const manualExits=closed
@@ -2015,12 +2016,41 @@ function renderAnalysis(){
     <button class="subtab ${analysisView==='combos'?'active':''}" onclick="switchAnalysisView('combos')">Combinations</button>
     <button class="subtab ${analysisView==='marginal'?'active':''}" onclick="switchAnalysisView('marginal')">Marginal Effects</button>
     <button class="subtab ${analysisView==='interaction'?'active':''}" onclick="switchAnalysisView('interaction')">Interaction Grids</button>
+    <button class="subtab ${analysisView==='expired'?'active':''}" onclick="switchAnalysisView('expired')">Expired Impact</button>
   </div>`;
   let body='';
   if(analysisView==='combos') body=renderCombosView(data);
   else if(analysisView==='marginal') body=renderMarginalView(data);
-  else body=renderInteractionView(data);
+  else if(analysisView==='interaction') body=renderInteractionView(data);
+  else body=renderExpiredImpactView(data);
   document.getElementById('analysis-content').innerHTML=manualBlock+subtabs+body;
+}
+
+// 2d: Expired Impact -- a dedicated, focused view for the win/loss-only vs
+// incl.-expired average return comparison, kept separate from the other
+// three views entirely rather than cramming extra columns into tables that
+// are already dense (confirmed via direct feedback that inline columns
+// made Combinations, Marginal Effects, and Interaction Grids too cluttered).
+function renderExpiredImpactView(data){
+  const rowsHtml=data.combos.map(c=>{
+    const exclStats=statsFor(c.rows);
+    if(!c.expiredCount) return null; // nothing to compare for a combo with zero expired trades -- skip rather than show a redundant identical row
+    return`<tr>
+      <td style="font-family:var(--mono);font-size:11px">${c.label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${c.expiredCount}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(exclStats.avgRet)}">${exclStats.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(c.avgRetInclExpired)}">${c.avgRetInclExpired}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${exclStats.n}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${exclStats.n+c.expiredCount}</td>
+    </tr>`;
+  }).filter(Boolean).join('');
+  if(!rowsHtml){
+    return`<div class="empty">No expired combos yet — this view fills in once some 42-band combos hit the 90-day cutoff without reaching either their stop or target.</div>`;
+  }
+  return`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Only combos with at least one expired trade are shown. Win rate and N are never affected by expired trades anywhere else in Analysis — this view exists purely to show how including them (marked-to-market at their real 90-day cutoff price) shifts average return specifically.</div>
+  <div class="tbl-wrap"><table class="tbl"><thead><tr>
+    <th>COMBINATION</th><th>EXPIRED COUNT</th><th>AVG RET (excl. expired)</th><th>AVG RET (incl. expired)</th><th>N (win/loss)</th><th>N (incl. expired)</th>
+  </tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
 }
 
 function switchAnalysisView(v){
@@ -2030,13 +2060,12 @@ function switchAnalysisView(v){
 
 // 2a: combination heatmap, now with AVG DAYS (WIN)/(LOSS) columns.
 function renderCombosView(data){
-  function buildRow(label,rows,isOrig,comboMeta){
+  function buildRow(label,rows,isOrig){
     const all=statsFor(rows);
     let cells=`
       <td style="font-family:var(--mono);font-size:11px">${label}</td>
       <td style="font-family:var(--mono);font-size:11px;color:${colorWr(all.wr)}">${all.wr}</td>
       <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${comboMeta?colorRet(comboMeta.avgRetInclExpired):'var(--muted)'}" title="${comboMeta&&comboMeta.expiredCount?comboMeta.expiredCount+' expired trade(s) included, marked-to-market at their 90-day cutoff price':''}">${comboMeta?comboMeta.avgRetInclExpired+(comboMeta.expiredCount?` (+${comboMeta.expiredCount})`:''):'—'}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
       <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
       <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>`;
@@ -2050,12 +2079,12 @@ function renderCombosView(data){
   }
   let html=`<div class="tbl-wrap"><table class="tbl"><thead><tr>
     <th>COMBINATION</th>
-    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — AVG RET (incl. expired)</th><th>ALL — N</th>
+    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
     <th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
     ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — WIN%</th><th>${s.short} — AVG RET</th>`).join('')}
   </tr></thead><tbody>`;
-  html+=buildRow('Original SL/TGT',data.origRows,true,null);
-  data.combos.forEach(c=>{html+=buildRow(c.label,c.rows,false,c);});
+  html+=buildRow('Original SL/TGT',data.origRows,true);
+  data.combos.forEach(c=>{html+=buildRow(c.label,c.rows,false);});
   html+='</tbody></table></div>';
   return html;
 }
