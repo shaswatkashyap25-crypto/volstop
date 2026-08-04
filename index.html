@@ -1864,7 +1864,7 @@ function renderTrades(){
     const fv20k2=findCombo(t,'full',20,2);
     return`<tr>
       <td style="color:var(--muted)">${i+1}</td>
-      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}${modLogBadge(t.modification_log)}</td>
+      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}${(!t.vol_monitoring_active&&t.hypothetical_tracking_active)?'<span class="tracking-badge" title="Still checking whether this would have triggered within 90 days of publish">hypothetical</span>':''}${modLogBadge(t.modification_log)}</td>
       <td>${t.entry_date||'—'}</td><td>${t.close_date||'—'}</td>
       <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.close_price)}</td>
       <td class="${cls}">${lr!=null?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
@@ -1873,7 +1873,7 @@ function renderTrades(){
       <td><span class="badge badge-${setupCls(t.setup_type)}">${t.setup_type}</span></td>
       <td style="font-size:10px;color:var(--muted)">${t.close_reason||'—'}</td>
       <td>
-        ${t.vol_monitoring_active?`<button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>`:''}
+        ${(t.vol_monitoring_active||t.hypothetical_tracking_active)?`<button class="btn-recheck-tr" onclick="manualRecheck('${t.id}')">Recheck</button>`:''}
         <button class="btn-edit-tr" onclick="openEdit('${t.id}')">Edit</button>
         <button class="btn-del-tr" onclick="delTrade('${t.id}')">Del</button>
       </td>
@@ -2032,25 +2032,99 @@ function renderAnalysis(){
 // are already dense (confirmed via direct feedback that inline columns
 // made Combinations, Marginal Effects, and Interaction Grids too cluttered).
 function renderExpiredImpactView(data){
-  const rowsHtml=data.combos.map(c=>{
-    const exclStats=statsFor(c.rows);
-    if(!c.expiredCount) return null; // nothing to compare for a combo with zero expired trades -- skip rather than show a redundant identical row
+  // Shared aggregation helper -- avoids duplicating this across every section below.
+  function statsInclExcl(rows,expiredRows){
+    const excl=statsFor(rows);
+    const allIncl=[...rows,...expiredRows];
+    const avgRetIncl=allIncl.length?(allIncl.reduce((s,r)=>s+(r.ret||0),0)/allIncl.length*100).toFixed(2)+'%':'—';
+    return{avgRetExcl:excl.avgRet,avgRetIncl,nExcl:excl.n,nIncl:allIncl.length,expiredCount:expiredRows.length};
+  }
+
+  const perComboRows=data.combos.map(c=>{
+    if(!c.expiredCount) return null;
+    const s=statsInclExcl(c.rows,c.expiredRows);
     return`<tr>
       <td style="font-family:var(--mono);font-size:11px">${c.label}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${c.expiredCount}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(exclStats.avgRet)}">${exclStats.avgRet}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(c.avgRetInclExpired)}">${c.avgRetInclExpired}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${exclStats.n}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${exclStats.n+c.expiredCount}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.expiredCount}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetExcl)}">${s.avgRetExcl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetIncl)}">${s.avgRetIncl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nExcl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nIncl}</td>
     </tr>`;
   }).filter(Boolean).join('');
-  if(!rowsHtml){
+
+  if(!perComboRows){
     return`<div class="empty">No expired combos yet — this view fills in once some 42-band combos hit the 90-day cutoff without reaching either their stop or target.</div>`;
   }
-  return`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Only combos with at least one expired trade are shown. Win rate and N are never affected by expired trades anywhere else in Analysis — this view exists purely to show how including them (marked-to-market at their real 90-day cutoff price) shifts average return specifically.</div>
+
+  const intro=`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Win rate and N are never affected by expired trades anywhere else in Analysis — every table below exists purely to show how including expired trades (marked-to-market at their real 90-day cutoff price) shifts average return specifically.</div>`;
+
+  // Per-combo (same granularity as Combinations)
+  let html=intro+`<div class="grid-title">Per combination</div>
   <div class="tbl-wrap"><table class="tbl"><thead><tr>
-    <th>COMBINATION</th><th>EXPIRED COUNT</th><th>AVG RET (excl. expired)</th><th>AVG RET (incl. expired)</th><th>N (win/loss)</th><th>N (incl. expired)</th>
-  </tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+    <th>COMBINATION</th><th>EXPIRED COUNT</th><th>AVG RET (excl.)</th><th>AVG RET (incl.)</th><th>N (win/loss)</th><th>N (incl. expired)</th>
+  </tr></thead><tbody>${perComboRows}</tbody></table></div>`;
+
+  // Grouped views -- mirrors Marginal Effects' three collapses
+  function groupedTable(title,groupKeyFn,groupLabels){
+    const groups={},expiredGroups={};
+    data.combos.forEach(c=>{
+      const key=groupKeyFn(c);
+      if(!groups[key]){groups[key]=[];expiredGroups[key]=[];}
+      groups[key].push(...c.rows);
+      expiredGroups[key].push(...c.expiredRows);
+    });
+    const rowsHtml=groupLabels.map(g=>{
+      const expRows=expiredGroups[g]||[];
+      if(!expRows.length) return null;
+      const s=statsInclExcl(groups[g]||[],expRows);
+      return`<tr>
+        <td style="font-family:var(--mono);font-size:11px">${g}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.expiredCount}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetExcl)}">${s.avgRetExcl}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetIncl)}">${s.avgRetIncl}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nExcl}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nIncl}</td>
+      </tr>`;
+    }).filter(Boolean).join('');
+    if(!rowsHtml) return '';
+    return`<div class="grid-title">${title}</div><div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>VALUE</th><th>EXPIRED COUNT</th><th>AVG RET (excl.)</th><th>AVG RET (incl.)</th><th>N (win/loss)</th><th>N (incl. expired)</th>
+    </tr></thead><tbody>${rowsHtml}</tbody></table></div>`;
+  }
+  html+=groupedTable('By k multiplier (collapsed across vol type &amp; lookback)', c=>String(c.k), KS.map(String));
+  html+=groupedTable('By vol type (collapsed across k &amp; lookback)', c=>c.vt==='full'?'Full Vol':'Downside Vol', ['Full Vol','Downside Vol']);
+  html+=groupedTable('By lookback (collapsed across k &amp; vol type)', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
+
+  // Setup-level breakdown -- mirrors Interaction Grids, but only the excl./incl. comparison, not the full win%/N set already shown there
+  const setupGroups={};
+  Object.keys(SETUP_TYPES).forEach(st=>{setupGroups[st]={rows:[],expiredRows:[]};});
+  data.combos.forEach(c=>{
+    Object.keys(SETUP_TYPES).forEach(st=>{
+      setupGroups[st].rows.push(...c.rows.filter(r=>r.setup===st));
+      setupGroups[st].expiredRows.push(...c.expiredRows.filter(r=>r.setup===st));
+    });
+  });
+  const setupRows=Object.keys(SETUP_TYPES).map(st=>{
+    const g=setupGroups[st];
+    if(!g.expiredRows.length) return null;
+    const s=statsInclExcl(g.rows,g.expiredRows);
+    return`<tr>
+      <td style="font-family:var(--mono);font-size:11px">${SETUP_TYPES[st].short}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.expiredCount}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetExcl)}">${s.avgRetExcl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetIncl)}">${s.avgRetIncl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nExcl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nIncl}</td>
+    </tr>`;
+  }).filter(Boolean).join('');
+  if(setupRows){
+    html+=`<div class="grid-title">By setup type (collapsed across all combos)</div><div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>SETUP</th><th>EXPIRED COUNT</th><th>AVG RET (excl.)</th><th>AVG RET (incl.)</th><th>N (win/loss)</th><th>N (incl. expired)</th>
+    </tr></thead><tbody>${setupRows}</tbody></table></div>`;
+  }
+
+  return html;
 }
 
 function switchAnalysisView(v){
@@ -2162,7 +2236,39 @@ function renderInteractionView(data){
   out+=gridFor('k × setup', c=>String(c.k), KS.map(String));
   out+=gridFor('Vol type × setup', c=>c.vt==='full'?'Full Vol':'Downside Vol', ['Full Vol','Downside Vol']);
   out+=gridFor('Lookback × setup', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
-  out+=`<div class="placeholder-note">Duration × setup (e.g. "does k=2 resolve faster on momentum vs. reversal vs. pullback trades") isn't shown yet — it needs the AVG DAYS figures in the Combinations view to build up across enough closed trades first. Once there's a reasonable sample per cell, this becomes a fourth grid here.</div>`;
+  function durationGridFor(title,groupKeyFn,groupLabels){
+    const groups={};
+    data.combos.forEach(c=>{
+      const key=groupKeyFn(c);
+      if(!groups[key]){
+        groups[key]={};
+        Object.keys(SETUP_TYPES).forEach(st=>{groups[key][st]=[];});
+      }
+      Object.keys(SETUP_TYPES).forEach(st=>{
+        groups[key][st].push(...c.rows.filter(r=>r.setup===st));
+      });
+    });
+    let html=`<div class="grid-title">${title}</div><div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>VALUE</th>
+      ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — DAYS (WIN)</th><th>${s.short} — DAYS (LOSS)</th><th>${s.short} — N</th>`).join('')}
+    </tr></thead><tbody>`;
+    groupLabels.forEach(g=>{
+      let cells=`<td style="font-family:var(--mono);font-size:11px">${g}</td>`;
+      Object.keys(SETUP_TYPES).forEach(st=>{
+        const rows=groups[g]?.[st]||[];
+        cells+=`
+        <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
+        <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${rows.length}</td>`;
+      });
+      html+=`<tr>${cells}</tr>`;
+    });
+    html+='</tbody></table></div>';
+    return html;
+  }
+  out+=durationGridFor('k × setup — duration', c=>String(c.k), KS.map(String));
+  out+=durationGridFor('Vol type × setup — duration', c=>c.vt==='full'?'Full Vol':'Downside Vol', ['Full Vol','Downside Vol']);
+  out+=durationGridFor('Lookback × setup — duration', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
   return out;
 }
 
@@ -2214,7 +2320,7 @@ async function confirmClose(){
   if(!isNotTriggered&&(!ep||!ed)){toast('Fill all fields','err');return;}
   try{
     const patch=isNotTriggered
-      ?{state:'CLOSED',close_price:null,close_date:new Date().toISOString().slice(0,10),close_reason:er,auto_closed:false,vol_monitoring_active:false}
+      ?{state:'CLOSED',close_price:null,close_date:new Date().toISOString().slice(0,10),close_reason:er,auto_closed:false,vol_monitoring_active:false,hypothetical_tracking_active:true}
       :{state:'CLOSED',close_price:ep,close_date:ed,close_reason:er,auto_closed:false};
     await apiUpdateTrade(closingId,patch);
     closeModal('modal-close'); await refreshAll();
