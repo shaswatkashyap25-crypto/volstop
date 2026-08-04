@@ -281,6 +281,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <button class="btn-sec" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
     <button class="exp-btn" style="width:100%" onclick="openDismissedModal()">Manage dismissed trades</button>
     <button class="exp-btn" style="width:100%" onclick="syncReviewList()" title="Remove items from this list that someone else has already logged or dismissed">⟳ Sync review list</button>
+    <button class="exp-btn" style="width:100%" id="btn-toggle-review-list" onclick="toggleReviewListVisibility()">▾ Collapse review list</button>
     <div id="parsed-list"></div>
     <button class="btn-main" id="btn-log-all" style="display:none" onclick="logAllParsed()">↓ Log all trades</button>
   </div>
@@ -414,7 +415,10 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
 <!-- Edit Modal -->
 <div class="modal-overlay" id="modal-edit">
   <div class="modal">
-    <h3>Edit trade</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>Edit trade</h3>
+      <button onclick="closeModal('modal-edit')" style="background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;line-height:1" title="Close">×</button>
+    </div>
     <div class="modal-form">
       <div class="field"><label>TICKER</label><input id="e-ticker" type="text"/></div>
       <div class="field"><label>BUY ABOVE / ENTRY (₹)</label><input id="e-price" type="number" step="0.05"/></div>
@@ -1355,12 +1359,23 @@ async function dismissParsedItem(uid){
 
 function updateLogAllButton(){
   const btn=document.getElementById('btn-log-all');
-  if(!parsedTrades.length){ btn.style.display='none'; return; }
+  const toggleBtn=document.getElementById('btn-toggle-review-list');
+  if(!parsedTrades.length){ btn.style.display='none'; toggleBtn.style.display='none'; return; }
   btn.style.display='block';
+  toggleBtn.style.display='block';
+  const list=document.getElementById('parsed-list');
+  if(list.style.display==='none') toggleBtn.textContent=`▸ Show review list (${parsedTrades.length})`;
   btn.innerHTML=`↓ Log ${parsedTrades.length} trade${parsedTrades.length>1?'s':''}`;
 }
 
 
+function toggleReviewListVisibility(){
+  const list=document.getElementById('parsed-list');
+  const btn=document.getElementById('btn-toggle-review-list');
+  const isHidden=list.style.display==='none';
+  list.style.display=isHidden?'':'none';
+  btn.textContent=isHidden?'▾ Collapse review list':`▸ Show review list (${parsedTrades.length})`;
+}
 function setParsedSetup(uid,val){
   const item=parsedTrades.find(x=>x.uid===uid);
   if(!item) return;
@@ -1911,6 +1926,7 @@ function buildAnalysisData(){
 
   const combos=combosMeta.map(({vt,lb,k})=>{
     const rows=[];
+    const expiredRows=[]; // separate from win/loss -- used only for the "incl. expired" avg return, never for win-rate or N
     closed.forEach(t=>{
       const c=findCombo(t,vt,lb,k);
       if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')){
@@ -1920,9 +1936,21 @@ function buildAnalysisData(){
           setup:t.setup_type,
           days:daysBetween(t.entry_date,c.close_date)
         });
+      }else if(c&&c.state==='CLOSED'&&c.close_reason==='EXPIRED'){
+        expiredRows.push({ret:c.log_return, setup:t.setup_type});
       }
     });
-    return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows};
+    // Average return across win+loss+expired together, using the real
+    // mark-to-market price already captured at the 90-day cutoff -- shown
+    // alongside (not replacing) the win/loss-only average, since excluding
+    // expired trades entirely was judged not fully representative, but
+    // folding them into win-rate isn't right either (expired isn't a real
+    // win or loss).
+    const allRowsInclExpired=[...rows,...expiredRows];
+    const avgRetInclExpired=allRowsInclExpired.length
+      ?(allRowsInclExpired.reduce((s,r)=>s+(r.ret||0),0)/allRowsInclExpired.length*100).toFixed(2)+'%'
+      :'—';
+    return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows,avgRetInclExpired,expiredCount:expiredRows.length};
   });
 
   const manualExits=closed
@@ -2002,12 +2030,13 @@ function switchAnalysisView(v){
 
 // 2a: combination heatmap, now with AVG DAYS (WIN)/(LOSS) columns.
 function renderCombosView(data){
-  function buildRow(label,rows,isOrig){
+  function buildRow(label,rows,isOrig,comboMeta){
     const all=statsFor(rows);
     let cells=`
       <td style="font-family:var(--mono);font-size:11px">${label}</td>
       <td style="font-family:var(--mono);font-size:11px;color:${colorWr(all.wr)}">${all.wr}</td>
       <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${comboMeta?colorRet(comboMeta.avgRetInclExpired):'var(--muted)'}" title="${comboMeta&&comboMeta.expiredCount?comboMeta.expiredCount+' expired trade(s) included, marked-to-market at their 90-day cutoff price':''}">${comboMeta?comboMeta.avgRetInclExpired+(comboMeta.expiredCount?` (+${comboMeta.expiredCount})`:''):'—'}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
       <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
       <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>`;
@@ -2021,12 +2050,12 @@ function renderCombosView(data){
   }
   let html=`<div class="tbl-wrap"><table class="tbl"><thead><tr>
     <th>COMBINATION</th>
-    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
+    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — AVG RET (incl. expired)</th><th>ALL — N</th>
     <th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
     ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — WIN%</th><th>${s.short} — AVG RET</th>`).join('')}
   </tr></thead><tbody>`;
-  html+=buildRow('Original SL/TGT',data.origRows,true);
-  data.combos.forEach(c=>{html+=buildRow(c.label,c.rows,false);});
+  html+=buildRow('Original SL/TGT',data.origRows,true,null);
+  data.combos.forEach(c=>{html+=buildRow(c.label,c.rows,false,c);});
   html+='</tbody></table></div>';
   return html;
 }
@@ -2156,7 +2185,7 @@ async function confirmClose(){
   if(!isNotTriggered&&(!ep||!ed)){toast('Fill all fields','err');return;}
   try{
     const patch=isNotTriggered
-      ?{state:'CLOSED',close_price:null,close_date:new Date().toISOString().slice(0,10),close_reason:er,auto_closed:false}
+      ?{state:'CLOSED',close_price:null,close_date:new Date().toISOString().slice(0,10),close_reason:er,auto_closed:false,vol_monitoring_active:false}
       :{state:'CLOSED',close_price:ep,close_date:ed,close_reason:er,auto_closed:false};
     await apiUpdateTrade(closingId,patch);
     closeModal('modal-close'); await refreshAll();
@@ -2226,6 +2255,27 @@ async function confirmOutcomeOverride(){
     const patch=isNotTriggered
       ?{close_price:null,close_date:newCloseDate,close_reason:reason,auto_closed:false,vol_monitoring_active:false}
       :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false};
+    // Reclassification: this trade genuinely triggered per the system (has
+    // a real entry_price), but the team had actually discarded it before
+    // that happened -- an oversight in the original logging, not a data
+    // error. The real entry/close/combo data that already exists here IS
+    // the correct answer to "what would have happened if we'd taken it" --
+    // move it into the hypothetical fields verbatim rather than discarding
+    // it or making the hypothetical side rediscover something we already
+    // know. Never mixes with a genuinely-never-entered trade's hypothetical
+    // tracking, which instead has to actively discover this from scratch
+    // (see the sweep logic, not built yet).
+    if(isNotTriggered&&t.entry_price!=null){
+      patch.hypothetical_entry_price=t.entry_price;
+      patch.hypothetical_entry_date=t.entry_date;
+      patch.hypothetical_vol_combinations=JSON.parse(JSON.stringify(t.vol_combinations||[]));
+      patch.hypothetical_orig_outcome={state:'CLOSED',close_reason:t.close_reason,close_date:t.close_date,close_price:t.close_price};
+      patch.hypothetical_tracking_active=false; // already fully resolved -- nothing left to sweep
+      patch.entry_price=null;
+      patch.entry_date=null;
+      patch.entry_time=null;
+      patch.vol_combinations=(t.vol_combinations||[]).map(c=>({...c,state:'PENDING',close_reason:null,close_date:null,close_price:null,log_return:null}));
+    }
     if(actuallyChanged) patch.modification_log=[...(t.modification_log||[]),logEntry];
     if(reason==='MANUAL'){
       // Switching to MANUAL introduces a NEW need to track the hypothetical
