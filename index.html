@@ -2224,7 +2224,7 @@ async function confirmOutcomeOverride(){
       new_value:{close_price:newClosePrice,close_date:newCloseDate,close_reason:reason}
     };
     const patch=isNotTriggered
-      ?{close_price:null,close_date:newCloseDate,close_reason:reason,auto_closed:false}
+      ?{close_price:null,close_date:newCloseDate,close_reason:reason,auto_closed:false,vol_monitoring_active:false}
       :{close_price:ep,close_date:ed,close_reason:reason,auto_closed:false};
     if(actuallyChanged) patch.modification_log=[...(t.modification_log||[]),logEntry];
     if(reason==='MANUAL'){
