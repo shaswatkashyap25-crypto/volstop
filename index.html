@@ -1116,7 +1116,7 @@ async function parsePaste(){
     const afterTag=block.slice(tagMatch.index+tagMatch[0].length);
     const bodyLines=afterTag.split(/\n/).map(l=>l.trim()).filter(Boolean);
     const rawTickerText=bodyLines[0];
-    const scrapedTicker=bodyLines[0]?.replace(/[^A-Z0-9&]/gi,'').toUpperCase();
+    const scrapedTicker=bodyLines[0]?.replace(/[^A-Z0-9&\-]/gi,'').toUpperCase();
     const ticker=correctionsMap.get(scrapedTicker)||scrapedTicker;
     const buyLine=bodyLines.find(l=>/BUY\s*(?:ABOVE|AT)/i.test(l));
     const slLine=bodyLines.find(l=>/^SL:/i.test(l));
@@ -1373,7 +1373,7 @@ function setParsedSetup(uid,val){
 function updateParsedTicker(uid,newValue){
   const item=parsedTrades.find(x=>x.uid===uid);
   if(!item) return;
-  item.ticker=newValue.trim().toUpperCase().replace(/[^A-Z0-9&]/g,'');
+  item.ticker=newValue.trim().toUpperCase().replace(/[^A-Z0-9&\-]/g,'');
 }
 
 // Shared dedupe key format: ticker (suffix-stripped, uppercased) + message
