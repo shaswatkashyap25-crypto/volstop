@@ -288,7 +288,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <textarea id="paste-input" placeholder="#POSITIONAL&#10;DMART&#10;BUY ABOVE: 4375&#10;SL: 4287 (DAY-CLOSING BASIS)&#10;TGT: 4551&#10;Holding Period: 30 Days&#10;&#10;...paste multiple"></textarea>
     </div>
     <button class="btn-sec" onclick="parsePaste()">Parse trades</button>
-    <button class="btn-sec" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
+    <button class="btn-sec" id="btn-fetch-tg" style="border-color:var(--accent);color:var(--accent)" onclick="fetchTGTrades()">↓ Fetch latest TG trades</button>
     <button class="exp-btn" style="width:100%" onclick="openDismissedModal()">Manage dismissed trades</button>
     <button class="exp-btn" style="width:100%" onclick="syncReviewList()" title="Remove items from this list that someone else has already logged or dismissed">⟳ Sync review list</button>
     <div id="parsed-list"></div>
@@ -1147,6 +1147,11 @@ async function parsePaste(){
 }
 
 async function fetchTGTrades(){
+  const btn=document.getElementById('btn-fetch-tg');
+  if(btn.disabled) return;
+  btn.disabled=true;
+  const origText=btn.textContent;
+  btn.textContent='Fetching…';
   toast('Fetching TG trades…','');
   try{
     const url='https://raw.githubusercontent.com/shaswatkashyap25-crypto/volstop/main/tg_trades.csv?t='+Date.now();
@@ -1245,8 +1250,17 @@ async function fetchTGTrades(){
       toast(skippedDismissed?`No new trades (${skippedDismissed} dismissed & skipped)`:'No new trades — everything in the CSV is already logged','ok');
       return;
     }
+    // Force the list visible -- if it was previously collapsed, newly-added
+    // cards would otherwise be appended but stay hidden, with nothing but
+    // the toast to suggest anything happened.
+    const list=document.getElementById('parsed-list');
+    if(list.style.display==='none') toggleReviewListVisibility();
     toast(`${added} new trade${added>1?'s':''} found${skippedDismissed?` (${skippedDismissed} dismissed & skipped)`:''} — review and log below`,'ok');
   }catch(e){toast('Fetch failed: '+e.message,'err');}
+  finally{
+    btn.disabled=false;
+    btn.textContent=origText;
+  }
 }
 
 let parsedUidCounter=0;
