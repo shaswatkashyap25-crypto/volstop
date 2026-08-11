@@ -1349,7 +1349,7 @@ function addParsedItem(p){
       </div>
       ${!p.setup?'<span style="font-size:9px;color:var(--amber);font-family:var(--mono)">untagged</span>':''}
     </div>
-    ${p.rationale?`<div class="pc-row"><textarea class="pc-input" style="width:100%;resize:vertical;font-size:11px" rows="2" oninput="updateParsedRationale('${uid}',this.value)" title="Extracted from the source message -- edit or clear if wrong">${escapeAttr(p.rationale)}</textarea></div>`:''}`;
+    ${p.rationale?`<div class="pc-row" style="flex-direction:column;align-items:stretch;gap:3px"><span class="pc-label" style="font-size:9px">RATIONALE</span><textarea class="pc-input" style="width:100%;resize:vertical;font-size:11px;min-height:54px" rows="4" oninput="updateParsedRationale('${uid}',this.value)" title="Extracted from the source message -- edit or clear if wrong">${escapeAttr(p.rationale)}</textarea></div>`:''}`;
   document.getElementById('parsed-list').appendChild(el);
   updateLogAllButton();
 }
