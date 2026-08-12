@@ -315,9 +315,11 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
       <button class="exp-btn" onclick="exportCSV('open')">Export CSV</button>
       <button class="exp-btn" onclick="checkSplits()">⟳ Check splits &amp; adjust</button>
       <button class="exp-btn" style="border-color:var(--amber);color:var(--amber)" onclick="resyncCallTimes()">⏱ Resync call times</button>
+      <button class="exp-btn" style="border-color:var(--accent2);color:var(--accent2)" onclick="startRecon()">🔍 Run Recon</button>
       <button class="exp-btn" onclick="copyTableToClipboard('table-open')">⧉ Copy</button>
       <button class="action-btn" onclick="refreshAll()">⟳ Refresh from server</button>
     </div>
+    <div id="recon-results" style="display:none;margin-bottom:14px"></div>
     <div class="tbl-filters">
       <input type="text" id="filter-open" placeholder="Search ticker, setup, status…" oninput="renderTrades()"/>
       <span class="tbl-filter-label">Date range:</span>
@@ -1700,6 +1702,91 @@ async function checkSplits(){
 // resets the trade to a clean PENDING state with the corrected timestamp
 // and re-sweeps it from scratch. A trade with no CSV match is left
 // untouched and reported separately rather than guessed at.
+// ── Recon ──
+// Re-walks every trade's full price history from scratch server-side and
+// diffs it against what's currently stored -- purely a read-only audit,
+// never auto-corrects anything. Runs across many chained background
+// invocations (a full trade-count re-walk needs far more subrequest budget
+// than any single invocation gets), so this function's job is just to
+// kick it off and then poll for progress -- the actual work all happens
+// server-side regardless of whether this tab stays open.
+let reconPollHandle=null;
+async function startRecon(){
+  if(!confirm("This re-walks EVERY trade's full price history from scratch to check for inconsistencies against what's currently stored. It runs in the background (can take a while for a large trade count) and never changes any trade data -- purely a read-only comparison report you review and fix yourself. Continue?")) return;
+  showProgress('Starting recon…');
+  try{
+    const r=await fetch(WORKER+'/run-recon');
+    const j=await r.json();
+    if(j.status!=='ok') throw new Error(j.message||'Failed to start recon');
+    pollReconStatus();
+  }catch(e){
+    hideProgressBanner();
+    toast('Recon failed to start: '+e.message,'err');
+  }
+}
+async function pollReconStatus(){
+  clearTimeout(reconPollHandle);
+  try{
+    const r=await fetch(WORKER+'/recon-status');
+    const j=await r.json();
+    const recon=j.recon;
+    if(!recon){ return; } // nothing ever run -- stay quiet, don't show a banner for "no recon"
+    if(recon.status==='running'){
+      operationInProgress=true; // recon runs server-side regardless of this tab, but still worth warning against a reload while actively watching it
+      showProgress(`Recon running… ${recon.processedCount}/${recon.totalTrades} trades checked, ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found so far`);
+      reconPollHandle=setTimeout(pollReconStatus,4000);
+    }else if(recon.status==='done'){
+      finishProgress(`✓ Recon complete: ${recon.totalTrades} trades checked, ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found`);
+      renderReconResults(recon);
+    }else if(recon.status==='paused_hop_limit'){
+      finishProgress(`⚠ Recon paused after hitting its safety hop limit — ${recon.processedCount}/${recon.totalTrades} checked so far, ${recon.diffs.length} found. Click Run Recon again to resume from here.`);
+      renderReconResults(recon);
+    }else if(recon.status==='error'){
+      finishProgress(`✗ Recon error: ${recon.error||'unknown'}`);
+    }
+  }catch(e){
+    // Transient network hiccup while polling shouldn't kill the whole
+    // recon UI -- the actual work is unaffected server-side, just keep
+    // trying to reconnect the progress display.
+    reconPollHandle=setTimeout(pollReconStatus,6000);
+  }
+}
+let LAST_RECON=null;
+function renderReconResults(recon){
+  LAST_RECON=recon;
+  const container=document.getElementById('recon-results');
+  if(!recon.diffs.length){
+    container.innerHTML='<div class="empty">No inconsistencies found ✓</div>';
+    container.style.display='block';
+    return;
+  }
+  const rows=recon.diffs.map(d=>`<tr>
+    <td>${d.ticker||'—'}</td>
+    <td style="font-size:10px;color:var(--muted)">${d.category}</td>
+    <td>${d.label}</td>
+    <td>${d.old??'—'}${d.oldDate?' ('+fmtDate(d.oldDate)+')':''}</td>
+    <td>${d.new??'—'}${d.newDate?' ('+fmtDate(d.newDate)+')':''}</td>
+  </tr>`).join('');
+  container.innerHTML=`<div style="font-size:12px;font-weight:600;margin-bottom:4px">Recon results — ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These are review-only -- nothing has been changed. Use Edit on the affected trade to correct anything that's genuinely wrong.</div>
+    <div class="tbl-actions"><button class="exp-btn" onclick="exportReconResults()">Export CSV</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>TICKER</th><th>TYPE</th><th>WHAT</th><th>CURRENTLY STORED</th><th>FRESH REPLAY SAYS</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  container.style.display='block';
+}
+function exportReconResults(){
+  if(!LAST_RECON||!LAST_RECON.diffs.length){toast('Nothing to export','err');return;}
+  const headers=['Ticker','Type','What','Currently Stored','Fresh Replay Says'];
+  const esc=s=>`"${String(s??'—').replace(/"/g,'""')}"`;
+  const rows=[headers.join(','),...LAST_RECON.diffs.map(d=>[
+    d.ticker||'—', d.category, d.label,
+    esc((d.old??'—')+(d.oldDate?' ('+fmtDate(d.oldDate)+')':'')),
+    esc((d.new??'—')+(d.newDate?' ('+fmtDate(d.newDate)+')':''))
+  ].join(','))];
+  const blob=new Blob([rows.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`volstop_recon_${new Date().toISOString().split('T')[0]}.csv`; a.click();
+}
+
 async function resyncCallTimes(){
   const allTrades=await apiGetTrades();
   const affected=allTrades.filter(t=>t.call_timestamp&&t.call_timestamp.endsWith('T00:00:00.000Z'));
@@ -3001,7 +3088,7 @@ function exportCSV(type){
     };
     (t.vol_combinations||[]).forEach(c=>{
       const pre=`${c.vol_type==='full'?'fv':'dv'}_${c.lookback}_k${String(c.k).replace('.','_')}`;
-      row[`${pre}_stop`]=c.stop; row[`${pre}_target`]=c.target; row[`${pre}_state`]=c.state; row[`${pre}_reason`]=c.close_reason;
+      row[`${pre}_stop`]=c.stop; row[`${pre}_target`]=c.target; row[`${pre}_state`]=c.state; row[`${pre}_reason`]=c.close_reason; row[`${pre}_close_date`]=fmtDate(c.close_date);
     });
     return row;
   });
@@ -3068,6 +3155,7 @@ document.getElementById('inp-date').value=new Date().toISOString().slice(0,10);
 document.getElementById('inp-time').value='09:15';
 setSeg('MOMENTUM');
 refreshAll();
+pollReconStatus();
 </script>
 </body>
 </html>
