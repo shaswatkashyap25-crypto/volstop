@@ -1894,10 +1894,19 @@ async function bulkFixCategory(category){
   await refreshAll();
   if(failures.length) console.warn(`bulkFixCategory(${category}): ${failures.length} failed —`,failures);
   finishProgress(`✓ ${info.label}: ${success} fixed${fail?`, ${fail} failed (see console, left in results to retry)`:''}`);
-  // Drop successfully-fixed trades from the LOCAL results view immediately
-  // -- failed ones stay visible since they still need attention, and
-  // running Recon again later will independently confirm everything.
+  // Drop successfully-fixed trades from the results view AND persist that
+  // updated list back to the server -- without the persist step, this only
+  // ever existed in this browser's memory, so reloading the page would
+  // silently re-fetch the stale server copy and look like nothing had
+  // actually been fixed (even though the real trade data was genuinely
+  // already saved). Failed ones stay visible since they still need
+  // attention; running Recon again later independently re-confirms everything.
   LAST_RECON={...LAST_RECON, diffs: LAST_RECON.diffs.filter(d=>!(d.category===category&&successIds.has(d.tradeId)))};
+  try{
+    await fetch(WORKER+'/recon-update-diffs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({diffs:LAST_RECON.diffs})});
+  }catch(e){
+    console.warn('Failed to persist recon progress to server -- results view will revert to stale data on next reload:',e.message);
+  }
   renderReconResults(LAST_RECON);
 }
 function renderReconResults(recon){
@@ -1934,9 +1943,9 @@ function renderReconResults(recon){
       <td style="font-family:var(--mono);font-size:11px">${info.label}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${g.diffs.length}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--accent)">${g.trades.size}</td>
-      <td style="font-size:11px;color:var(--muted);max-width:340px">${info.action}${bulkFixBtn?`<div style="margin-top:6px">${bulkFixBtn}</div>`:''}</td>
+      <td style="font-size:11px;color:var(--muted);max-width:340px;white-space:normal">${info.action}${bulkFixBtn?`<div style="margin-top:6px">${bulkFixBtn}</div>`:''}</td>
     </tr>
-    <tr><td colspan="4" style="padding-top:0;padding-bottom:14px">${tradeButtons}</td></tr>`;
+    <tr><td colspan="4" style="padding-top:0;padding-bottom:14px;white-space:normal">${tradeButtons}</td></tr>`;
   }).join('');
 
   const categoryOptions=Object.keys(byCategory).map(cat=>`<option value="${cat}">${(RECON_CATEGORY_INFO[cat]||{label:cat}).label} (${byCategory[cat].diffs.length})</option>`).join('');
