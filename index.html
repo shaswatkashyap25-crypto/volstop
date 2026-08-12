@@ -1786,19 +1786,37 @@ function openEditFromRecon(tradeId){
 }
 // Programmatically does exactly what "Edit -> Save" (no field changes)
 // already does by hand -- recomputes vol/combos fresh from current price
-// data and fully resets tracking. Only offered for categories confirmed
-// guaranteed-wrong with no judgment call needed (zero-level corruption,
-// weekend close dates) -- deliberately NOT offered for categories that
-// genuinely need a human to look at each one (combo/main/hypothetical
-// differences), since auto-applying those would be a real auto-correction,
-// which recon was explicitly designed never to do on its own.
-const RECON_BULK_FIXABLE=new Set(['zero_level_corruption','weekend_close_date']);
+// data and fully resets tracking. Different categories need genuinely
+// different SCOPES of reset, not one-size-fits-all -- critically,
+// not_triggered_hypothetical and manual_hypothetical must ONLY ever touch
+// hypothetical_* fields, never the real trade record, since that's exactly
+// the "locked, never touched" boundary recon is built to respect. Getting
+// this wrong would mean accidentally un-freezing a NOT_TRIGGERED trade's
+// real decision -- the one thing recon must never do.
+const RECON_FIX_STRATEGY={
+  zero_level_corruption:'full',
+  weekend_close_date:'full',
+  main:'full',
+  combo:'combo_only',
+  not_triggered_hypothetical:'hypothetical_only',
+  manual_hypothetical:'manual_hypothetical_only',
+  error:'recheck_only',
+};
+const RECON_BULK_FIXABLE=new Set(Object.keys(RECON_FIX_STRATEGY));
+const RECON_STRATEGY_DESC={
+  full:'forces a full fresh recompute (equivalent to Edit → Save with no field changes) -- resets and re-verifies the ENTIRE trade from scratch',
+  combo_only:'resets and re-verifies only the 42 vol-based stop/target combos -- the real main outcome (already correct) is left untouched',
+  hypothetical_only:'resets and re-verifies only the hypothetical "would this have triggered" layer -- the real, locked record is never touched',
+  manual_hypothetical_only:'resets and re-verifies only the "would holding have won" hypothetical layer -- your real manual exit is never touched',
+  recheck_only:'simply retries the check -- useful if the original failure was transient (e.g. a rate limit), harmless either way',
+};
 async function bulkFixCategory(category){
   if(!LAST_RECON||!RECON_BULK_FIXABLE.has(category)) return;
+  const strategy=RECON_FIX_STRATEGY[category];
   const uniqueTrades=[...new Map(LAST_RECON.diffs.filter(d=>d.category===category&&d.tradeId).map(d=>[d.tradeId,d.ticker])).entries()];
   if(!uniqueTrades.length){toast('Nothing to fix in this category','ok');return;}
   const info=RECON_CATEGORY_INFO[category]||{label:category};
-  if(!confirm(`This forces a fresh recompute (equivalent to opening Edit and clicking Save on each, with no field changes) on all ${uniqueTrades.length} trades in "${info.label}". Each trade's tracking resets from scratch using its current publish date and re-verifies against current price data. Continue?`)) return;
+  if(!confirm(`This ${RECON_STRATEGY_DESC[strategy]} on all ${uniqueTrades.length} trades in "${info.label}". Continue?`)) return;
 
   showProgress(`Fixing ${info.label}: 0/${uniqueTrades.length}…`);
   let success=0,fail=0;
@@ -1809,30 +1827,62 @@ async function bulkFixCategory(category){
     updateProgress(`Fixing ${info.label}: ${i+1}/${uniqueTrades.length} (${ticker})…`);
     const t=ALL_TRADES.find(x=>x.id===id);
     if(!t){ fail++; failures.push({ticker,error:'not found locally'}); continue; }
+    const logEntry={ts:new Date().toISOString(),field:'recon_bulk_fix',old_value:info.label,new_value:'recomputed'};
     try{
-      const{date:pubDate,time:pubTime}=utcIsoToIstParts(t.call_timestamp);
-      const useDate=pubDate||t.entry_date||'';
-      const useTime=pubTime||'09:15';
-      const useEntry=t.buy_above??t.entry_price;
-      const d=await computeVol(t.ticker,useEntry,t.setup_type,useDate);
-      const newCallTimestamp=csvDateTimeToUtcISOString(useDate,useTime)||t.call_timestamp;
-      const patch={
-        ticker:d.ticker,
-        call_timestamp:newCallTimestamp,
-        setup_type:t.setup_type,
-        buy_above:useEntry,
-        orig_sl:t.orig_sl,
-        orig_tgt:t.orig_tgt,
-        vol_annualized:d.vol_annualized,
-        vol_combinations:comboSkeleton(d.combos),
-        modification_log:[...(t.modification_log||[]),{ts:new Date().toISOString(),field:'recon_bulk_fix',old_value:info.label,new_value:'recomputed'}],
-        state:'PENDING', entry_date:null, entry_time:null, entry_price:null,
-        close_reason:null, close_date:null, close_price:null,
-        auto_closed:false, vol_monitoring_active:true,
-        last_swept_date:null, replay_error:null
-      };
-      await apiUpdateTrade(id,patch);
-      await apiRecheckTrade(id);
+      if(strategy==='full'){
+        const{date:pubDate,time:pubTime}=utcIsoToIstParts(t.call_timestamp);
+        const useDate=pubDate||t.entry_date||'';
+        const useTime=pubTime||'09:15';
+        const useEntry=t.buy_above??t.entry_price;
+        const d=await computeVol(t.ticker,useEntry,t.setup_type,useDate);
+        const newCallTimestamp=csvDateTimeToUtcISOString(useDate,useTime)||t.call_timestamp;
+        await apiUpdateTrade(id,{
+          ticker:d.ticker, call_timestamp:newCallTimestamp, setup_type:t.setup_type,
+          buy_above:useEntry, orig_sl:t.orig_sl, orig_tgt:t.orig_tgt,
+          vol_annualized:d.vol_annualized, vol_combinations:comboSkeleton(d.combos),
+          modification_log:[...(t.modification_log||[]),logEntry],
+          state:'PENDING', entry_date:null, entry_time:null, entry_price:null,
+          close_reason:null, close_date:null, close_price:null,
+          auto_closed:false, vol_monitoring_active:true,
+          last_swept_date:null, replay_error:null
+        });
+        await apiRecheckTrade(id);
+      }else if(strategy==='combo_only'){
+        // Same stop/target levels (already correct, that's not what's
+        // flagged here) -- just resets each combo's own resolved state so
+        // it walks fresh. Real state/close_reason/entry_price untouched.
+        await apiUpdateTrade(id,{
+          vol_combinations:comboSkeleton(t.vol_combinations||[]),
+          last_swept_date:null, no_data_streak:0, replay_error:null,
+          vol_monitoring_active:true,
+          modification_log:[...(t.modification_log||[]),logEntry]
+        });
+        await apiRecheckTrade(id);
+      }else if(strategy==='hypothetical_only'){
+        await apiUpdateTrade(id,{
+          hypothetical_entry_price:null, hypothetical_entry_date:null,
+          hypothetical_tracking_active:true, hypothetical_vol_combinations:[],
+          hypothetical_last_swept_date:null,
+          hypothetical_orig_outcome:{state:'PENDING',close_reason:null,close_date:null,close_price:null},
+          replay_error:null,
+          modification_log:[...(t.modification_log||[]),logEntry]
+        });
+        await apiRecheckTrade(id);
+      }else if(strategy==='manual_hypothetical_only'){
+        // last_swept_date reset restarts the regular sweepTrade walk from
+        // call_timestamp -- safe for an already-CLOSED trade, since
+        // applyCandleToTrade's state-transition blocks only ever fire for
+        // PENDING/OPEN trades. Only the MANUAL-gated hypothetical block
+        // and the real combos (unrelated to this reset) re-evaluate.
+        await apiUpdateTrade(id,{
+          hypothetical_orig_outcome:{state:'PENDING',close_reason:null,close_date:null,close_price:null},
+          last_swept_date:null, replay_error:null, vol_monitoring_active:true,
+          modification_log:[...(t.modification_log||[]),logEntry]
+        });
+        await apiRecheckTrade(id);
+      }else if(strategy==='recheck_only'){
+        await apiRecheckTrade(id);
+      }
       success++;
       successIds.add(id);
     }catch(e){
