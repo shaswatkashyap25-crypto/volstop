@@ -1769,6 +1769,15 @@ async function checkReconOnLoad(){
   }catch(e){}
 }
 let LAST_RECON=null;
+const RECON_CATEGORY_INFO={
+  zero_level_corruption:{label:'Zero-level corruption',action:'Mechanical fix — Edit → Save on each (forces a fresh recompute, replacing the corrupted 0-level and any resulting false win/loss). No investigation needed, these are guaranteed wrong.'},
+  weekend_close_date:{label:'Weekend close date',action:'Mechanical fix — Edit → Save on each (forces a fresh re-walk against current price data). Confirmed guaranteed-wrong, same as TVSSCS.'},
+  main:{label:'Main outcome differs',action:'Needs review — the main trade\'s real outcome genuinely disagrees with a fresh replay. Check what actually happened before deciding whether to fix.'},
+  combo:{label:'Combo outcome differs',action:'Needs review — a real 42-band combo disagrees with a fresh replay on a specific date. May be a walk-forward edge case, not necessarily wrong.'},
+  not_triggered_hypothetical:{label:'Not-triggered hypothetical differs',action:'Needs review — the hypothetical "would this have triggered" layer disagrees with a fresh replay.'},
+  manual_hypothetical:{label:'Manual-exit hypothetical differs',action:'Needs review — the "would holding have won" layer disagrees with a fresh replay.'},
+  error:{label:'Recon check failed',action:'Recon itself couldn\'t complete for this trade — check manually, may need a Fyers symbol fix or similar.'},
+};
 function renderReconResults(recon){
   LAST_RECON=recon;
   const container=document.getElementById('recon-results');
@@ -1777,18 +1786,59 @@ function renderReconResults(recon){
     container.style.display='block';
     return;
   }
-  const rows=recon.diffs.map(d=>`<tr>
+  // The raw diff count is combo-level, not trade-level -- one corrupted
+  // trade can throw 10-20+ rows (all 42 combos affected the same way), so
+  // showing that number alone is misleading about actual scope. Group by
+  // category and count UNIQUE trades per category instead, since that's
+  // the number that actually tells you how much work is involved.
+  const byCategory={};
+  recon.diffs.forEach(d=>{
+    if(!byCategory[d.category]) byCategory[d.category]={diffs:[],tickers:new Set(),tradeIds:new Set()};
+    byCategory[d.category].diffs.push(d);
+    if(d.ticker) byCategory[d.category].tickers.add(d.ticker);
+    if(d.tradeId) byCategory[d.category].tradeIds.add(d.tradeId);
+  });
+  const summaryRows=Object.keys(byCategory).map(cat=>{
+    const g=byCategory[cat];
+    const info=RECON_CATEGORY_INFO[cat]||{label:cat,action:'Needs review.'};
+    const tickerList=[...g.tickers].sort().join(', ');
+    return`<tr>
+      <td style="font-family:var(--mono);font-size:11px">${info.label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${g.diffs.length}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--accent)">${g.tradeIds.size}</td>
+      <td style="font-size:11px;color:var(--muted);max-width:340px">${info.action}</td>
+    </tr>
+    <tr><td colspan="4" style="font-family:var(--mono);font-size:10px;color:var(--muted);padding-top:0;padding-bottom:14px">Tickers: ${tickerList}</td></tr>`;
+  }).join('');
+
+  const categoryOptions=Object.keys(byCategory).map(cat=>`<option value="${cat}">${(RECON_CATEGORY_INFO[cat]||{label:cat}).label} (${byCategory[cat].diffs.length})</option>`).join('');
+
+  container.innerHTML=`<div style="font-size:12px;font-weight:600;margin-bottom:4px">Recon results — ${recon.diffs.length} row${recon.diffs.length===1?'':'s'} across ${Object.keys(byCategory).length} categor${Object.keys(byCategory).length===1?'y':'ies'}</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These are review-only — nothing has been changed. The count that matters is UNIQUE TRADES, not rows (one corrupted trade can throw many combo-level rows). Start with the mechanical-fix categories below, they need no investigation.</div>
+    <div class="tbl-wrap" style="margin-bottom:16px"><table class="tbl"><thead><tr><th>CATEGORY</th><th>ROWS</th><th>UNIQUE TRADES</th><th>WHAT TO DO</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
+    <div class="tbl-actions">
+      <span class="tbl-filter-label">Filter detail table:</span>
+      <select id="recon-category-filter" onchange="renderReconDetailTable()" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">
+        <option value="">All categories</option>
+        ${categoryOptions}
+      </select>
+      <button class="exp-btn" onclick="exportReconResults()" style="margin-left:auto">Export CSV</button>
+    </div>
+    <div id="recon-detail-table"></div>`;
+  container.style.display='block';
+  renderReconDetailTable();
+}
+function renderReconDetailTable(){
+  if(!LAST_RECON) return;
+  const filter=document.getElementById('recon-category-filter')?.value||'';
+  const rows=LAST_RECON.diffs.filter(d=>!filter||d.category===filter).map(d=>`<tr>
     <td>${d.ticker||'—'}</td>
     <td style="font-size:10px;color:var(--muted)">${d.category}</td>
     <td>${d.label}</td>
     <td>${d.old??'—'}${d.oldDate?' ('+fmtDate(d.oldDate)+')':''}</td>
     <td>${d.new??'—'}${d.newDate?' ('+fmtDate(d.newDate)+')':''}</td>
   </tr>`).join('');
-  container.innerHTML=`<div style="font-size:12px;font-weight:600;margin-bottom:4px">Recon results — ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These are review-only -- nothing has been changed. Use Edit on the affected trade to correct anything that's genuinely wrong.</div>
-    <div class="tbl-actions"><button class="exp-btn" onclick="exportReconResults()">Export CSV</button></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>TICKER</th><th>TYPE</th><th>WHAT</th><th>CURRENTLY STORED</th><th>FRESH REPLAY SAYS</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  container.style.display='block';
+  document.getElementById('recon-detail-table').innerHTML=`<div class="tbl-wrap"><table class="tbl"><thead><tr><th>TICKER</th><th>TYPE</th><th>WHAT</th><th>CURRENTLY STORED</th><th>FRESH REPLAY SAYS</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function exportReconResults(){
   if(!LAST_RECON||!LAST_RECON.diffs.length){toast('Nothing to export','err');return;}
