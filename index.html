@@ -715,7 +715,16 @@ async function fetchPrices(ticker, forDate=null){
     const sym=raw+sfx;
     try{
       const clean=await fetchYahooAdjustedCloses(sym,p1,p2);
-      if(clean&&clean.length>=20) return{sym,closes:clean};
+      // Floor of 2 (not 20) -- just enough to compute a single log return.
+      // The vol-calculation code already handles insufficient history
+      // gracefully everywhere downstream (null vol_annualized, "n/a" combo
+      // cells, the "Xd of history, Y/Z lookback skipped" note) -- a hard
+      // 20-close gate here was blocking that logic from ever running at
+      // all for a very recently listed stock (e.g. AMAGI, listed Jan 2026),
+      // throwing "No data for X" instead of logging a trade that simply
+      // can't support vol-based combos YET but can still track its real
+      // SL/TGT normally.
+      if(clean&&clean.length>=2) return{sym,closes:clean};
     }catch(e){}
   }
 
@@ -726,7 +735,7 @@ async function fetchPrices(ticker, forDate=null){
   try{
     const sym=toFyersSym(ticker);
     const j=await fyersFetch(`/data/history?symbol=${encodeURIComponent(sym)}&resolution=D&date_format=0&range_from=${p1}&range_to=${p2}&cont_flag=1`);
-    if(j?.s==='ok'&&j?.candles?.length>=20){
+    if(j?.s==='ok'&&j?.candles?.length>=2){
       const epochs=j.candles.map(c=>c[0]);
       let closes=j.candles.map(c=>c[4]);
       const yahooSym=raw+'.NS';
@@ -989,7 +998,11 @@ function renderResult(d){
   const notes=[];
   if(d.history_days<252){
     const missing=LBS.filter(lb=>d.history_days<lb);
-    notes.push(`${d.history_days} days of history. ${missing.map(l=>l+'d').join(', ')} lookback skipped.`);
+    if(missing.length===LBS.length){
+      notes.push(`Only ${d.history_days} day(s) of price history -- not enough for any vol-based stop/target yet. This trade will log fine and track its real SL/TGT normally, but all 42 combo cells will show n/a until more trading days accumulate.`);
+    }else{
+      notes.push(`${d.history_days} days of history. ${missing.map(l=>l+'d').join(', ')} lookback skipped.`);
+    }
   }
   if(d.splitAdjustmentUncertain){
     notes.push('⚠ Used Fyers fallback data — split-adjustment could not be independently verified via Yahoo. Double-check this vol figure if the stock had a recent split/bonus.');
