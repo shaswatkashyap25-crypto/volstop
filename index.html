@@ -952,9 +952,11 @@ function escapeAttr(s){
 function modLogBadge(log){
   if(!log||!log.length) return '';
   const summary=log.map(e=>{
-    if(e.field==='outcome_override') return `${e.ts.slice(0,10)}: outcome corrected (${e.old_value.close_reason||'—'}→${e.new_value.close_reason})`;
+    if(e.field==='outcome_override') return `${fmtDate(e.ts.slice(0,10))}: outcome corrected (${e.old_value.close_reason||'—'}→${e.new_value.close_reason})`;
     const tag=e.before_trigger?'before trigger':'after trigger';
-    return `${e.ts.slice(0,10)}: ${e.field} ${e.old_value}→${e.new_value} (${tag})`;
+    const oldVal=e.field==='publish_date'?fmtDate(e.old_value):e.old_value;
+    const newVal=e.field==='publish_date'?fmtDate(e.new_value):e.new_value;
+    return `${fmtDate(e.ts.slice(0,10))}: ${e.field} ${oldVal}→${newVal} (${tag})`;
   }).join('\n');
   return ` <span class="modlog-badge" title="${escapeAttr(summary)}">📝 ${log.length} edit${log.length>1?'s':''}</span>`;
 }
@@ -987,6 +989,27 @@ function expiryBadge(t){
 function fmt(v,dec=2){
   if(v===undefined||v===null||v==='') return '—';
   return parseFloat(v).toLocaleString('en-IN',{minimumFractionDigits:dec});
+}
+// dd/mm/yyyy everywhere a date is DISPLAYED (tables, badges, CSV cell
+// content) -- doesn't touch native <input type="date"> fields, which are
+// browser-controlled and already render per the browser's own locale, and
+// doesn't touch CSV/export FILENAMES, which must stay yyyy-mm-dd since a
+// literal "/" in a filename gets read as a path separator and breaks the
+// download outright.
+function fmtDate(dateStr){
+  if(!dateStr) return '—';
+  const parts=String(dateStr).slice(0,10).split('-');
+  if(parts.length!==3) return dateStr;
+  const[y,m,d]=parts;
+  return `${d}/${m}/${y}`;
+}
+// Full IST date+time, reusing the existing UTC->IST conversion so this
+// never drifts out of sync with how call_timestamp is interpreted
+// everywhere else in the app.
+function fmtDateTime(isoString){
+  if(!isoString) return '—';
+  const{date,time}=utcIsoToIstParts(isoString);
+  return `${fmtDate(date)} ${time}`;
 }
 
 function renderResult(d){
@@ -1937,7 +1960,7 @@ function renderTrades(){
     return`<tr>
     <td style="color:var(--muted)">${i+1}</td>
     <td class="c-open">${t.ticker}${rationaleBadge(t.rationale)}</td>
-    <td>${t.entry_date||t.call_timestamp?.slice(0,10)||'—'}</td>
+    <td>${fmtDate(t.entry_date||t.call_timestamp?.slice(0,10))}</td>
     <td>₹${fmt(t.entry_price??t.buy_above)}</td>
     <td><span class="badge badge-${setupCls(t.setup_type)}">${t.setup_type}</span></td>
     <td class="orig-sl">${t.orig_sl!=null?'₹'+fmt(t.orig_sl):'—'}</td>
@@ -1966,7 +1989,7 @@ function renderTrades(){
     return`<tr>
       <td style="color:var(--muted)">${i+1}</td>
       <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}${(!t.vol_monitoring_active&&t.hypothetical_tracking_active)?'<span class="tracking-badge" title="Still checking whether this would have triggered within 15 days of publish -- if it did, tracking continues for up to 90 days from that point, same as a real trade">hypothetical</span>':''}${modLogBadge(t.modification_log)}${rationaleBadge(t.rationale)}</td>
-      <td>${t.entry_date||'—'}</td><td>${t.close_date||'—'}</td>
+      <td>${fmtDate(t.entry_date)}</td><td>${fmtDate(t.close_date)}</td>
       <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.close_price)}</td>
       <td class="${cls}">${lr!=null?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
       ${outcomeCell(t.orig_sl!=null?t.close_reason:null)}
@@ -2091,7 +2114,7 @@ function renderManualExitsBlock(manualExits){
       :`<span style="color:${m.betterThanHolding?'var(--red)':'var(--green)'}">${m.hypoReason} (${(m.hypoRet*100).toFixed(2)}%)</span>`;
     const verdict=m.betterThanHolding==null?'—':(m.betterThanHolding?'<span style="color:var(--green)">exit was better</span>':'<span style="color:var(--red)">holding would\'ve been better</span>');
     return`<tr>
-      <td>${m.ticker}</td><td>${m.closeDate}</td>
+      <td>${m.ticker}</td><td>${fmtDate(m.closeDate)}</td>
       <td>${(m.realRet*100).toFixed(2)}%</td>
       <td>${hypoLabel}</td>
       <td>${verdict}</td>
@@ -2776,9 +2799,13 @@ async function confirmEdit(){
   btn.disabled=true; btn.textContent='Recalculating…';
   try{
     const newCallTimestamp=csvDateTimeToUtcISOString(newDate,newTime);
-    // #24 -- log entry price / SL / TGT changes only, with a before/after
-    // trigger tag. Ticker/setup/publish-time are deliberately excluded --
-    // those are data hygiene, not edits to the trade's actual thesis.
+    // #24 -- log entry price / SL / TGT / publish-date changes, with a
+    // before/after trigger tag. Ticker and setup-tag are still excluded --
+    // those are data hygiene, not edits to the trade's actual thesis or
+    // verification window. Publish date is NOT hygiene, though: it defines
+    // the entire window a trade gets walked and verified against, so an
+    // accidental or mistaken change here is exactly the kind of thing that
+    // needs to be traceable after the fact, not invisible.
     const wasTriggered=t.state!=='PENDING';
     const newLogEntries=[];
     const correctionDate=document.getElementById('e-correction-date').value;
@@ -2787,6 +2814,7 @@ async function confirmEdit(){
     if(t.buy_above!==newPrice) newLogEntries.push({ts:correctionTs,field:'entry_price',old_value:t.buy_above,new_value:newPrice,before_trigger:!wasTriggered});
     if((t.orig_sl??null)!==newSl) newLogEntries.push({ts:correctionTs,field:'orig_sl',old_value:t.orig_sl,new_value:newSl,before_trigger:!wasTriggered});
     if((t.orig_tgt??null)!==newTgt) newLogEntries.push({ts:correctionTs,field:'orig_tgt',old_value:t.orig_tgt,new_value:newTgt,before_trigger:!wasTriggered});
+    if(t.call_timestamp!==(newCallTimestamp||t.call_timestamp)) newLogEntries.push({ts:correctionTs,field:'publish_date',old_value:t.call_timestamp?.slice(0,10),new_value:(newCallTimestamp||t.call_timestamp)?.slice(0,10),before_trigger:!wasTriggered});
     // Entry price is changing — stop/target = entry * exp(±k*vol/√252), so
     // they must be recomputed from scratch, not left at whatever they were
     // under the old entry price. Vol% itself barely moves over a few days,
@@ -2825,7 +2853,7 @@ let deletingId=null;
 function delTrade(id){
   deletingId=id;
   const t=ALL_TRADES.find(x=>x.id===id);
-  document.getElementById('modal-delete-title').textContent=`Delete ${t.ticker} (${t.entry_date||t.call_timestamp?.slice(0,10)})?`;
+  document.getElementById('modal-delete-title').textContent=`Delete ${t.ticker} (${fmtDate(t.entry_date||t.call_timestamp?.slice(0,10))})?`;
   document.getElementById('del-dismiss-check').checked=false; // opt-in, not opt-out
   document.getElementById('modal-delete').classList.add('show');
 }
@@ -2884,7 +2912,7 @@ function renderDismissedList(){
         <span style="color:var(--muted);font-size:10px;font-family:var(--mono);width:20px">${i+1}</span>
         <div>
           <span class="parsed-ticker">${d.ticker}</span>
-          <span class="parsed-orig" style="display:block;margin-top:2px">${d.date}</span>
+          <span class="parsed-orig" style="display:block;margin-top:2px">${fmtDate(d.date)}</span>
         </div>
       </div>
       <button class="btn-recheck-tr" onclick="undoDismiss('${d.key}')">Undo</button>
@@ -2892,14 +2920,14 @@ function renderDismissedList(){
 }
 function copyDismissedToClipboard(){
   if(!DISMISSED_CACHE.length){toast('Nothing to copy','err');return;}
-  const tsv=['TICKER\tDATE\tDISMISSED AT',...DISMISSED_CACHE.map(d=>`${d.ticker}\t${d.date}\t${d.dismissed_at}`)].join('\n');
+  const tsv=['TICKER\tDATE\tDISMISSED AT',...DISMISSED_CACHE.map(d=>`${d.ticker}\t${fmtDate(d.date)}\t${fmtDateTime(d.dismissed_at)}`)].join('\n');
   navigator.clipboard.writeText(tsv)
     .then(()=>toast('✓ Copied to clipboard','ok'))
     .catch(()=>toast('Copy failed','err'));
 }
 function exportDismissedCSV(){
   if(!DISMISSED_CACHE.length){toast('Nothing to export','err');return;}
-  const csv=['ticker,date,dismissed_at',...DISMISSED_CACHE.map(d=>`${d.ticker},${d.date},${d.dismissed_at}`)].join('\n');
+  const csv=['ticker,date,dismissed_at',...DISMISSED_CACHE.map(d=>`${d.ticker},${fmtDate(d.date)},${fmtDateTime(d.dismissed_at)}`)].join('\n');
   const blob=new Blob([csv],{type:'text/csv'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -2955,16 +2983,18 @@ function exportCSV(type){
     // quoting/escaping, so a stray comma would silently break column
     // alignment for every row after it.
     const modSummary=log.map(e=>{
-      if(e.field==='outcome_override') return `${e.ts.slice(0,10)}: outcome corrected (${e.old_value.close_reason||'none'} -> ${e.new_value.close_reason})`;
+      if(e.field==='outcome_override') return `${fmtDate(e.ts.slice(0,10))}: outcome corrected (${e.old_value.close_reason||'none'} -> ${e.new_value.close_reason})`;
       const tag=e.before_trigger?'before trigger':'after trigger';
-      return `${e.ts.slice(0,10)}: ${e.field} ${e.old_value} -> ${e.new_value} (${tag})`;
+      const oldVal=e.field==='publish_date'?fmtDate(e.old_value):e.old_value;
+      const newVal=e.field==='publish_date'?fmtDate(e.new_value):e.new_value;
+      return `${fmtDate(e.ts.slice(0,10))}: ${e.field} ${oldVal} -> ${newVal} (${tag})`;
     }).join(' | ');
     const h=t.hypothetical_orig_outcome;
     const row={
       id:t.id, ticker:t.ticker, setup_type:t.setup_type, buy_above:t.buy_above,
-      orig_sl:t.orig_sl, orig_tgt:t.orig_tgt, call_timestamp:t.call_timestamp,
-      entry_date:t.entry_date, entry_price:t.entry_price, state:t.state,
-      close_reason:t.close_reason, close_date:t.close_date, close_price:t.close_price,
+      orig_sl:t.orig_sl, orig_tgt:t.orig_tgt, call_timestamp:fmtDateTime(t.call_timestamp),
+      entry_date:fmtDate(t.entry_date), entry_price:t.entry_price, state:t.state,
+      close_reason:t.close_reason, close_date:fmtDate(t.close_date), close_price:t.close_price,
       auto_closed:t.auto_closed, vol_monitoring_active:t.vol_monitoring_active,
       modification_count:log.length, modification_summary:modSummary,
       hypothetical_orig_state:h?h.state:'', hypothetical_orig_reason:h?h.close_reason:'', hypothetical_orig_close_price:h?h.close_price:''
