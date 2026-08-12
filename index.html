@@ -955,6 +955,7 @@ function modLogBadge(log){
   if(!log||!log.length) return '';
   const summary=log.map(e=>{
     if(e.field==='outcome_override') return `${fmtDate(e.ts.slice(0,10))}: outcome corrected (${e.old_value.close_reason||'—'}→${e.new_value.close_reason})`;
+    if(e.field==='recon_bulk_fix') return `${fmtDate(e.ts.slice(0,10))}: recon bulk-fix (${e.old_value}) — recomputed from scratch`;
     const tag=e.before_trigger?'before trigger':'after trigger';
     const oldVal=e.field==='publish_date'?fmtDate(e.old_value):e.old_value;
     const newVal=e.field==='publish_date'?fmtDate(e.new_value):e.new_value;
@@ -1783,6 +1784,72 @@ function openEditFromRecon(tradeId){
   if(!t){toast('Trade not found locally -- try "Refresh from server" first','err');return;}
   openEdit(tradeId);
 }
+// Programmatically does exactly what "Edit -> Save" (no field changes)
+// already does by hand -- recomputes vol/combos fresh from current price
+// data and fully resets tracking. Only offered for categories confirmed
+// guaranteed-wrong with no judgment call needed (zero-level corruption,
+// weekend close dates) -- deliberately NOT offered for categories that
+// genuinely need a human to look at each one (combo/main/hypothetical
+// differences), since auto-applying those would be a real auto-correction,
+// which recon was explicitly designed never to do on its own.
+const RECON_BULK_FIXABLE=new Set(['zero_level_corruption','weekend_close_date']);
+async function bulkFixCategory(category){
+  if(!LAST_RECON||!RECON_BULK_FIXABLE.has(category)) return;
+  const uniqueTrades=[...new Map(LAST_RECON.diffs.filter(d=>d.category===category&&d.tradeId).map(d=>[d.tradeId,d.ticker])).entries()];
+  if(!uniqueTrades.length){toast('Nothing to fix in this category','ok');return;}
+  const info=RECON_CATEGORY_INFO[category]||{label:category};
+  if(!confirm(`This forces a fresh recompute (equivalent to opening Edit and clicking Save on each, with no field changes) on all ${uniqueTrades.length} trades in "${info.label}". Each trade's tracking resets from scratch using its current publish date and re-verifies against current price data. Continue?`)) return;
+
+  showProgress(`Fixing ${info.label}: 0/${uniqueTrades.length}…`);
+  let success=0,fail=0;
+  const failures=[];
+  const successIds=new Set();
+  for(let i=0;i<uniqueTrades.length;i++){
+    const[id,ticker]=uniqueTrades[i];
+    updateProgress(`Fixing ${info.label}: ${i+1}/${uniqueTrades.length} (${ticker})…`);
+    const t=ALL_TRADES.find(x=>x.id===id);
+    if(!t){ fail++; failures.push({ticker,error:'not found locally'}); continue; }
+    try{
+      const{date:pubDate,time:pubTime}=utcIsoToIstParts(t.call_timestamp);
+      const useDate=pubDate||t.entry_date||'';
+      const useTime=pubTime||'09:15';
+      const useEntry=t.buy_above??t.entry_price;
+      const d=await computeVol(t.ticker,useEntry,t.setup_type,useDate);
+      const newCallTimestamp=csvDateTimeToUtcISOString(useDate,useTime)||t.call_timestamp;
+      const patch={
+        ticker:d.ticker,
+        call_timestamp:newCallTimestamp,
+        setup_type:t.setup_type,
+        buy_above:useEntry,
+        orig_sl:t.orig_sl,
+        orig_tgt:t.orig_tgt,
+        vol_annualized:d.vol_annualized,
+        vol_combinations:comboSkeleton(d.combos),
+        modification_log:[...(t.modification_log||[]),{ts:new Date().toISOString(),field:'recon_bulk_fix',old_value:info.label,new_value:'recomputed'}],
+        state:'PENDING', entry_date:null, entry_time:null, entry_price:null,
+        close_reason:null, close_date:null, close_price:null,
+        auto_closed:false, vol_monitoring_active:true,
+        last_swept_date:null, replay_error:null
+      };
+      await apiUpdateTrade(id,patch);
+      await apiRecheckTrade(id);
+      success++;
+      successIds.add(id);
+    }catch(e){
+      fail++;
+      failures.push({ticker,error:e.message});
+    }
+    await new Promise(r=>setTimeout(r,250)); // same pacing as batch-log, avoids hammering the Yahoo/Fyers proxy
+  }
+  await refreshAll();
+  if(failures.length) console.warn(`bulkFixCategory(${category}): ${failures.length} failed —`,failures);
+  finishProgress(`✓ ${info.label}: ${success} fixed${fail?`, ${fail} failed (see console, left in results to retry)`:''}`);
+  // Drop successfully-fixed trades from the LOCAL results view immediately
+  // -- failed ones stay visible since they still need attention, and
+  // running Recon again later will independently confirm everything.
+  LAST_RECON={...LAST_RECON, diffs: LAST_RECON.diffs.filter(d=>!(d.category===category&&successIds.has(d.tradeId)))};
+  renderReconResults(LAST_RECON);
+}
 function renderReconResults(recon){
   LAST_RECON=recon;
   const container=document.getElementById('recon-results');
@@ -1810,11 +1877,14 @@ function renderReconResults(recon){
     const tradeButtons=[...g.trades.entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||'')).map(([id,ticker])=>
       `<button class="exp-btn" style="padding:2px 8px;font-size:10px;margin:2px" onclick="openEditFromRecon('${id}')" title="Open Edit for ${escapeAttr(ticker||id)}">${escapeAttr(ticker||'—')}</button>`
     ).join('');
+    const bulkFixBtn=RECON_BULK_FIXABLE.has(cat)
+      ?`<button class="btn-log" style="padding:3px 12px;font-size:10px;width:auto;display:inline-block" onclick="bulkFixCategory('${cat}')">⚡ Fix all ${g.trades.size} at once</button>`
+      :'';
     return`<tr>
       <td style="font-family:var(--mono);font-size:11px">${info.label}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${g.diffs.length}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--accent)">${g.trades.size}</td>
-      <td style="font-size:11px;color:var(--muted);max-width:340px">${info.action}</td>
+      <td style="font-size:11px;color:var(--muted);max-width:340px">${info.action}${bulkFixBtn?`<div style="margin-top:6px">${bulkFixBtn}</div>`:''}</td>
     </tr>
     <tr><td colspan="4" style="padding-top:0;padding-bottom:14px">${tradeButtons}</td></tr>`;
   }).join('');
