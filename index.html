@@ -1952,7 +1952,7 @@ function renderTrades(){
     const fv20k2=findCombo(t,'full',20,2);
     return`<tr>
       <td style="color:var(--muted)">${i+1}</td>
-      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}${(!t.vol_monitoring_active&&t.hypothetical_tracking_active)?'<span class="tracking-badge" title="Still checking whether this would have triggered within 90 days of publish">hypothetical</span>':''}${modLogBadge(t.modification_log)}${rationaleBadge(t.rationale)}</td>
+      <td class="${cls}">${t.ticker}${t.auto_closed?'<span class="auto-badge">auto</span>':''}${t.vol_monitoring_active?'<span class="tracking-badge">tracking</span>':''}${(!t.vol_monitoring_active&&t.hypothetical_tracking_active)?'<span class="tracking-badge" title="Still checking whether this would have triggered within 15 days of publish -- if it did, tracking continues for up to 90 days from that point, same as a real trade">hypothetical</span>':''}${modLogBadge(t.modification_log)}${rationaleBadge(t.rationale)}</td>
       <td>${t.entry_date||'—'}</td><td>${t.close_date||'—'}</td>
       <td>₹${fmt(t.entry_price)}</td><td>₹${fmt(t.close_price)}</td>
       <td class="${cls}">${lr!=null?(lr>=0?'+':'')+(lr*100).toFixed(2)+'%':'—'}</td>
@@ -1985,7 +1985,7 @@ function avgDaysFmt(rows,reason){
   return (withDays.reduce((s,r)=>s+r.days,0)/withDays.length).toFixed(1);
 }
 
-let analysisView='combos'; // 'combos' | 'marginal' | 'interaction'
+let analysisView='combos'; // 'combos' | 'marginal' | 'interaction' | 'expired' | 'whatif'
 
 // Builds the full row-list once per render: one entry per combination
 // (Original SL/TGT + all 42 vol combos), each carrying its own list of
@@ -2105,12 +2105,14 @@ function renderAnalysis(){
     <button class="subtab ${analysisView==='marginal'?'active':''}" onclick="switchAnalysisView('marginal')">Marginal Effects</button>
     <button class="subtab ${analysisView==='interaction'?'active':''}" onclick="switchAnalysisView('interaction')">Interaction Grids</button>
     <button class="subtab ${analysisView==='expired'?'active':''}" onclick="switchAnalysisView('expired')">Expired Impact</button>
+    <button class="subtab ${analysisView==='whatif'?'active':''}" onclick="switchAnalysisView('whatif')">What-If</button>
   </div>`;
   let body='';
   if(analysisView==='combos') body=renderCombosView(data);
   else if(analysisView==='marginal') body=renderMarginalView(data);
   else if(analysisView==='interaction') body=renderInteractionView(data);
-  else body=renderExpiredImpactView(data);
+  else if(analysisView==='expired') body=renderExpiredImpactView(data);
+  else body=renderWhatIfView();
   document.getElementById('analysis-content').innerHTML=manualBlock+subtabs+body;
 }
 
@@ -2223,6 +2225,194 @@ function renderExpiredImpactView(data){
   html+=crossTabGrid('Lookback × setup', c=>String(c.lb)+'d', LBS.map(l=>l+'d'));
 
   return html;
+}
+
+// 2e: What-If -- toggles between two genuinely different questions on two
+// disjoint trade populations, deliberately kept as separate reads rather
+// than blended into one number (blending "what if I'd taken this" with
+// "what if I'd held that" would corrupt whatever conclusion either number
+// is meant to support):
+//   - Not-triggered: fully hypothetical -- these trades never actually
+//     entered. Reads hypothetical_orig_outcome + hypothetical_vol_combinations,
+//     which only exist/resolve correctly now that the 15-day discovery
+//     window and 90-day hypothetical expiry are both in place.
+//   - Manual-exit: NOT hypothetical -- the real 42 vol_combinations kept
+//     tracking actual price action after the early exit regardless of why
+//     the main trade closed, so this is just isolating already-real data
+//     from the auto-closed trades it's normally blended with everywhere
+//     else in Analysis. The existing "Manual exits" block above already
+//     covers the orig-SL/TGT what-if for this category -- no orig row here.
+let whatIfCategory='not_triggered'; // 'not_triggered' | 'manual_exit'
+function switchWhatIfCategory(v){
+  whatIfCategory=v;
+  renderAnalysis();
+}
+
+function buildWhatIfData(category){
+  let closed=ALL_TRADES.filter(t=>t.close_reason===(category==='not_triggered'?'NOT_TRIGGERED':'MANUAL'));
+  const from=document.getElementById('filter-analysis-from')?.value;
+  const to=document.getElementById('filter-analysis-to')?.value;
+  if(from||to) closed=closed.filter(t=>{
+    const d=t.close_date||'';
+    return (!from||d>=from)&&(!to||d<=to);
+  });
+
+  function logRet(entry,exit){return (entry&&exit)?Math.log(exit/entry):null;}
+  const combosMeta=[];
+  LBS.forEach(lb=>['full','downside'].forEach(vt=>KS.forEach(k=>combosMeta.push({vt,lb,k}))));
+
+  if(category==='not_triggered'){
+    const origRows=closed
+      .filter(t=>t.hypothetical_orig_outcome&&(t.hypothetical_orig_outcome.close_reason==='TARGET_HIT'||t.hypothetical_orig_outcome.close_reason==='SL_HIT'))
+      .map(t=>({
+        ret:logRet(t.hypothetical_entry_price,t.hypothetical_orig_outcome.close_price),
+        reason:t.hypothetical_orig_outcome.close_reason==='TARGET_HIT'?'WIN':'LOSS',
+        setup:t.setup_type,
+        days:daysBetween(t.hypothetical_entry_date,t.hypothetical_orig_outcome.close_date)
+      }));
+    const origExpiredRows=closed
+      .filter(t=>t.hypothetical_orig_outcome?.close_reason==='EXPIRED')
+      .map(t=>({ret:logRet(t.hypothetical_entry_price,t.hypothetical_orig_outcome.close_price),setup:t.setup_type}));
+    const neverTriggeredCount=closed.filter(t=>t.hypothetical_orig_outcome?.close_reason==='NEVER_TRIGGERED').length;
+    const stillTrackingCount=closed.filter(t=>t.hypothetical_tracking_active===true).length;
+
+    const combos=combosMeta.map(({vt,lb,k})=>{
+      const rows=[],expiredRows=[];
+      closed.forEach(t=>{
+        const c=(t.hypothetical_vol_combinations||[]).find(x=>x.vol_type===vt&&x.lookback===lb&&x.k===k);
+        if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')){
+          rows.push({ret:c.log_return,reason:c.close_reason==='TARGET_HIT'?'WIN':'LOSS',setup:t.setup_type,days:daysBetween(t.hypothetical_entry_date,c.close_date)});
+        }else if(c&&c.state==='CLOSED'&&c.close_reason==='EXPIRED'){
+          expiredRows.push({ret:c.log_return,setup:t.setup_type});
+        }
+      });
+      return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows,expiredRows,expiredCount:expiredRows.length};
+    });
+
+    return{category,origRows,origExpiredRows,combos,closedCount:closed.length,neverTriggeredCount,stillTrackingCount};
+  }else{
+    const combos=combosMeta.map(({vt,lb,k})=>{
+      const rows=[],expiredRows=[];
+      closed.forEach(t=>{
+        const c=findCombo(t,vt,lb,k);
+        if(c&&c.state==='CLOSED'&&(c.close_reason==='TARGET_HIT'||c.close_reason==='SL_HIT')){
+          rows.push({ret:c.log_return,reason:c.close_reason==='TARGET_HIT'?'WIN':'LOSS',setup:t.setup_type,days:daysBetween(t.entry_date,c.close_date)});
+        }else if(c&&c.state==='CLOSED'&&c.close_reason==='EXPIRED'){
+          expiredRows.push({ret:c.log_return,setup:t.setup_type});
+        }
+      });
+      return{vt,lb,k,label:`${vt==='full'?'FV':'DV'} ${lb}d k${k}`,rows,expiredRows,expiredCount:expiredRows.length};
+    });
+    return{category,origRows:null,origExpiredRows:null,combos,closedCount:closed.length};
+  }
+}
+
+function renderWhatIfView(){
+  const data=buildWhatIfData(whatIfCategory);
+  const selector=`<div style="margin-bottom:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span class="tbl-filter-label">Show:</span>
+    <select onchange="switchWhatIfCategory(this.value)" style="padding:5px 9px;font-family:var(--mono);font-size:11px;background:var(--s2);border:1px solid var(--border2);border-radius:6px;color:var(--text)">
+      <option value="not_triggered" ${whatIfCategory==='not_triggered'?'selected':''}>Not-triggered trades (hypothetical)</option>
+      <option value="manual_exit" ${whatIfCategory==='manual_exit'?'selected':''}>Manual-exit trades (real combos)</option>
+    </select>
+    <button class="exp-btn" onclick="exportWhatIf()" style="margin-left:auto">Export CSV</button>
+  </div>`;
+
+  if(!data.closedCount){
+    const emptyMsg=whatIfCategory==='not_triggered'?'No not-triggered trades in range yet.':'No manually-exited trades in range yet.';
+    return selector+`<div class="empty">${emptyMsg}</div>`;
+  }
+
+  let intro='';
+  if(whatIfCategory==='not_triggered'){
+    intro=`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${data.closedCount} not-triggered call(s) in range — ${data.neverTriggeredCount} never crossed buy_above within 15 days, ${data.stillTrackingCount} still being checked. These numbers are entirely hypothetical — none of these trades actually happened.</div>`;
+  }else{
+    intro=`<div style="font-size:11px;color:var(--muted);margin-bottom:10px">${data.closedCount} manually-exited trade(s) in range. These are REAL combo outcomes — the 42 vol-based stop/target bands kept tracking actual price action after the early exit, independent of the manual decision. See the "Manual exits" summary above for the orig-SL/TGT what-if.</div>`;
+  }
+
+  function buildRow(label,rows,isOrig){
+    const all=statsFor(rows);
+    let cells=`
+      <td style="font-family:var(--mono);font-size:11px">${label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(all.wr)}">${all.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(all.avgRet)}">${all.avgRet}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${all.n}</td>
+      <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'WIN')}</td>
+      <td style="font-family:var(--mono);font-size:11px" class="days-val">${avgDaysFmt(rows,'LOSS')}</td>`;
+    Object.keys(SETUP_TYPES).forEach(st=>{
+      const s=statsFor(rows.filter(r=>r.setup===st));
+      cells+=`
+      <td style="font-family:var(--mono);font-size:11px;color:${colorWr(s.wr)}">${s.wr}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRet)}">${s.avgRet}</td>`;
+    });
+    return`<tr style="${isOrig?'background:var(--s2);font-weight:500':''}">${cells}</tr>`;
+  }
+
+  let table=`<div class="tbl-wrap"><table class="tbl"><thead><tr>
+    <th>COMBINATION</th>
+    <th>ALL — WIN%</th><th>ALL — AVG RET</th><th>ALL — N</th>
+    <th>AVG DAYS (WIN)</th><th>AVG DAYS (LOSS)</th>
+    ${Object.values(SETUP_TYPES).map(s=>`<th>${s.short} — WIN%</th><th>${s.short} — AVG RET</th>`).join('')}
+  </tr></thead><tbody>`;
+  if(data.origRows) table+=buildRow('Original SL/TGT (hypothetical)',data.origRows,true);
+  data.combos.forEach(c=>{table+=buildRow(c.label,c.rows,false);});
+  table+='</tbody></table></div>';
+
+  // Same excl./incl.-expired mechanic as the main Expired Impact subtab,
+  // scoped to just this category's rows -- win rate and N still never
+  // touched by expired trades, only average return.
+  function statsInclExcl(rows,expiredRows){
+    const excl=statsFor(rows);
+    const allIncl=[...rows,...expiredRows];
+    const avgRetIncl=allIncl.length?(allIncl.reduce((s,r)=>s+(r.ret||0),0)/allIncl.length*100).toFixed(2)+'%':'—';
+    return{avgRetExcl:excl.avgRet,avgRetIncl,nExcl:excl.n,nIncl:allIncl.length,expiredCount:expiredRows.length};
+  }
+  const expiredSourceRows=[
+    ...(data.origRows?[{label:'Original SL/TGT (hypothetical)',rows:data.origRows,expiredRows:data.origExpiredRows||[]}]:[]),
+    ...data.combos.map(c=>({label:c.label,rows:c.rows,expiredRows:c.expiredRows}))
+  ].filter(r=>r.expiredRows.length);
+  const expiredRowsHtml=expiredSourceRows.map(r=>{
+    const s=statsInclExcl(r.rows,r.expiredRows);
+    return`<tr>
+      <td style="font-family:var(--mono);font-size:11px">${r.label}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.expiredCount}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetExcl)}">${s.avgRetExcl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:${colorRet(s.avgRetIncl)}">${s.avgRetIncl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nExcl}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.nIncl}</td>
+    </tr>`;
+  }).join('');
+
+  let expiredBlock='';
+  if(expiredRowsHtml){
+    expiredBlock=`<div class="grid-title">Expired impact (this category)</div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>COMBINATION</th><th>EXPIRED COUNT</th><th>AVG RET (excl.)</th><th>AVG RET (incl.)</th><th>N (win/loss)</th><th>N (incl. expired)</th>
+    </tr></thead><tbody>${expiredRowsHtml}</tbody></table></div>`;
+  }
+
+  return selector+intro+table+expiredBlock;
+}
+
+function exportWhatIf(){
+  const data=buildWhatIfData(whatIfCategory);
+  if(!data.closedCount){toast('Nothing to export for this category','err');return;}
+  const rowsAll=[...(data.origRows?[{label:'Original SL/TGT (hypothetical)',rows:data.origRows}]:[]),...data.combos.map(c=>({label:c.label,rows:c.rows}))];
+  const headers=['Combination','Setup','N','Wins','Win%','Avg Log Return%','Avg Days (Win)','Avg Days (Loss)'];
+  const out=[headers.join(',')];
+  ['ALL',...Object.keys(SETUP_TYPES)].forEach(st=>{
+    rowsAll.forEach(r=>{
+      const rows=st==='ALL'?r.rows:r.rows.filter(x=>x.setup===st);
+      if(!rows.length) return;
+      const wins=rows.filter(x=>x.reason==='WIN').length;
+      const wr=((wins/rows.length)*100).toFixed(1);
+      const avgRet=(rows.reduce((s,x)=>s+(x.ret||0),0)/rows.length*100).toFixed(2);
+      out.push([r.label,st,rows.length,wins,wr,avgRet,avgDaysFmt(rows,'WIN'),avgDaysFmt(rows,'LOSS')].join(','));
+    });
+  });
+  const blob=new Blob([out.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`volstop_whatif_${whatIfCategory}_${new Date().toISOString().split('T')[0]}.csv`; a.click();
 }
 
 function switchAnalysisView(v){
