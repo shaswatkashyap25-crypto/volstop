@@ -1778,6 +1778,11 @@ const RECON_CATEGORY_INFO={
   manual_hypothetical:{label:'Manual-exit hypothetical differs',action:'Needs review — the "would holding have won" layer disagrees with a fresh replay.'},
   error:{label:'Recon check failed',action:'Recon itself couldn\'t complete for this trade — check manually, may need a Fyers symbol fix or similar.'},
 };
+function openEditFromRecon(tradeId){
+  const t=ALL_TRADES.find(x=>x.id===tradeId);
+  if(!t){toast('Trade not found locally -- try "Refresh from server" first','err');return;}
+  openEdit(tradeId);
+}
 function renderReconResults(recon){
   LAST_RECON=recon;
   const container=document.getElementById('recon-results');
@@ -1789,32 +1794,35 @@ function renderReconResults(recon){
   // The raw diff count is combo-level, not trade-level -- one corrupted
   // trade can throw 10-20+ rows (all 42 combos affected the same way), so
   // showing that number alone is misleading about actual scope. Group by
-  // category and count UNIQUE trades per category instead, since that's
-  // the number that actually tells you how much work is involved.
+  // category and track UNIQUE trades (tradeId -> ticker) per category,
+  // since that's both the number that tells you actual scope AND lets
+  // every ticker shown become a direct "open Edit for this exact trade"
+  // button -- no manually hunting through Open/Closed tabs to find it.
   const byCategory={};
   recon.diffs.forEach(d=>{
-    if(!byCategory[d.category]) byCategory[d.category]={diffs:[],tickers:new Set(),tradeIds:new Set()};
+    if(!byCategory[d.category]) byCategory[d.category]={diffs:[],trades:new Map()};
     byCategory[d.category].diffs.push(d);
-    if(d.ticker) byCategory[d.category].tickers.add(d.ticker);
-    if(d.tradeId) byCategory[d.category].tradeIds.add(d.tradeId);
+    if(d.tradeId) byCategory[d.category].trades.set(d.tradeId,d.ticker);
   });
   const summaryRows=Object.keys(byCategory).map(cat=>{
     const g=byCategory[cat];
     const info=RECON_CATEGORY_INFO[cat]||{label:cat,action:'Needs review.'};
-    const tickerList=[...g.tickers].sort().join(', ');
+    const tradeButtons=[...g.trades.entries()].sort((a,b)=>(a[1]||'').localeCompare(b[1]||'')).map(([id,ticker])=>
+      `<button class="exp-btn" style="padding:2px 8px;font-size:10px;margin:2px" onclick="openEditFromRecon('${id}')" title="Open Edit for ${escapeAttr(ticker||id)}">${escapeAttr(ticker||'—')}</button>`
+    ).join('');
     return`<tr>
       <td style="font-family:var(--mono);font-size:11px">${info.label}</td>
       <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${g.diffs.length}</td>
-      <td style="font-family:var(--mono);font-size:11px;color:var(--accent)">${g.tradeIds.size}</td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--accent)">${g.trades.size}</td>
       <td style="font-size:11px;color:var(--muted);max-width:340px">${info.action}</td>
     </tr>
-    <tr><td colspan="4" style="font-family:var(--mono);font-size:10px;color:var(--muted);padding-top:0;padding-bottom:14px">Tickers: ${tickerList}</td></tr>`;
+    <tr><td colspan="4" style="padding-top:0;padding-bottom:14px">${tradeButtons}</td></tr>`;
   }).join('');
 
   const categoryOptions=Object.keys(byCategory).map(cat=>`<option value="${cat}">${(RECON_CATEGORY_INFO[cat]||{label:cat}).label} (${byCategory[cat].diffs.length})</option>`).join('');
 
   container.innerHTML=`<div style="font-size:12px;font-weight:600;margin-bottom:4px">Recon results — ${recon.diffs.length} row${recon.diffs.length===1?'':'s'} across ${Object.keys(byCategory).length} categor${Object.keys(byCategory).length===1?'y':'ies'}</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These are review-only — nothing has been changed. The count that matters is UNIQUE TRADES, not rows (one corrupted trade can throw many combo-level rows). Start with the mechanical-fix categories below, they need no investigation.</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">These are review-only — nothing has been changed. Click any ticker below to open Edit for that exact trade directly. The count that matters is UNIQUE TRADES, not rows (one corrupted trade can throw many combo-level rows). Start with the mechanical-fix categories below, they need no investigation -- just Edit → Save.</div>
     <div class="tbl-wrap" style="margin-bottom:16px"><table class="tbl"><thead><tr><th>CATEGORY</th><th>ROWS</th><th>UNIQUE TRADES</th><th>WHAT TO DO</th></tr></thead><tbody>${summaryRows}</tbody></table></div>
     <div class="tbl-actions">
       <span class="tbl-filter-label">Filter detail table:</span>
@@ -1832,7 +1840,7 @@ function renderReconDetailTable(){
   if(!LAST_RECON) return;
   const filter=document.getElementById('recon-category-filter')?.value||'';
   const rows=LAST_RECON.diffs.filter(d=>!filter||d.category===filter).map(d=>`<tr>
-    <td>${d.ticker||'—'}</td>
+    <td>${d.tradeId?`<a href="#" onclick="openEditFromRecon('${d.tradeId}');return false;" style="color:var(--accent);text-decoration:underline;cursor:pointer">${d.ticker||'—'}</a>`:(d.ticker||'—')}</td>
     <td style="font-size:10px;color:var(--muted)">${d.category}</td>
     <td>${d.label}</td>
     <td>${d.old??'—'}${d.oldDate?' ('+fmtDate(d.oldDate)+')':''}</td>
