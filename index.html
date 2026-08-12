@@ -406,7 +406,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
     <h3 id="modal-close-title">Close trade</h3>
     <div class="modal-form">
       <div class="field" id="m-price-field"><label>EXIT PRICE (₹)</label><input id="m-price" type="number" step="0.05"/></div>
-      <div class="field" id="m-date-field"><label>EXIT DATE</label><input id="m-date" type="date"/></div>
+      <div class="field" id="m-date-field"><label id="m-date-label">EXIT DATE</label><input id="m-date" type="date"/></div>
       <div class="field"><label>EXIT REASON</label>
         <select id="m-reason" onchange="toggleCloseExitFields()">
           <option value="TARGET_HIT">Target hit</option>
@@ -415,7 +415,7 @@ header{border-bottom:1px solid var(--border);padding:14px 28px;display:flex;alig
           <option value="NOT_TRIGGERED">Not triggered</option>
         </select>
       </div>
-      <div id="m-not-triggered-note" style="display:none;font-size:10px;font-family:var(--mono);color:var(--muted)">This trade never entered, so there's no exit price to record — today's date is saved automatically as when this was marked.</div>
+      <div id="m-not-triggered-note" style="display:none;font-size:10px;font-family:var(--mono);color:var(--muted)">This trade never entered, so there's no exit price to record. The date below defaults to today but can be backdated to when this was actually decided (e.g. when your team discarded it).</div>
     </div>
     <div class="modal-acts">
       <button class="btn-cancel" onclick="closeModal('modal-close')">Cancel</button>
@@ -2406,7 +2406,13 @@ function openClose(id){
 function toggleCloseExitFields(){
   const isNotTriggered=document.getElementById('m-reason').value==='NOT_TRIGGERED';
   document.getElementById('m-price-field').style.display=isNotTriggered?'none':'';
-  document.getElementById('m-date-field').style.display=isNotTriggered?'none':'';
+  // Date stays visible & editable even for NOT_TRIGGERED. It used to be
+  // hidden here AND silently force-overwritten with today's date at
+  // confirm time (see confirmClose), which discarded any backdated value
+  // someone had already typed in -- e.g. "the team actually discarded this
+  // Friday, I'm just getting around to logging it Monday." The label below
+  // just clarifies what the date means in this specific case.
+  document.getElementById('m-date-label').textContent=isNotTriggered?'DATE MARKED (editable, defaults to today)':'EXIT DATE';
   document.getElementById('m-not-triggered-note').style.display=isNotTriggered?'':'none';
 }
 async function confirmClose(){
@@ -2415,10 +2421,16 @@ async function confirmClose(){
   const ed=document.getElementById('m-date').value;
   const er=document.getElementById('m-reason').value;
   const isNotTriggered=er==='NOT_TRIGGERED';
-  if(!isNotTriggered&&(!ep||!ed)){toast('Fill all fields','err');return;}
+  // Price is still genuinely optional for NOT_TRIGGERED (there was no real
+  // entry, so no real exit price exists) -- but the date is always
+  // required and always honored as typed, same as every other close
+  // reason. Previously this silently replaced whatever was in the date
+  // field with today's date, discarding a deliberate backdate.
+  if(!ed){toast('Fill in a date','err');return;}
+  if(!isNotTriggered&&!ep){toast('Fill all fields','err');return;}
   try{
     const patch=isNotTriggered
-      ?{state:'CLOSED',close_price:null,close_date:new Date().toISOString().slice(0,10),close_reason:er,auto_closed:false,vol_monitoring_active:false,hypothetical_tracking_active:true}
+      ?{state:'CLOSED',close_price:null,close_date:ed,close_reason:er,auto_closed:false,vol_monitoring_active:false,hypothetical_tracking_active:true}
       :{state:'CLOSED',close_price:ep,close_date:ed,close_reason:er,auto_closed:false};
     await apiUpdateTrade(closingId,patch);
     closeModal('modal-close'); await refreshAll();
