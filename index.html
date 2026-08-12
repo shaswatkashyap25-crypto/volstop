@@ -1705,51 +1705,68 @@ async function checkSplits(){
 // ── Recon ──
 // Re-walks every trade's full price history from scratch server-side and
 // diffs it against what's currently stored -- purely a read-only audit,
-// never auto-corrects anything. Runs across many chained background
-// invocations (a full trade-count re-walk needs far more subrequest budget
-// than any single invocation gets), so this function's job is just to
-// kick it off and then poll for progress -- the actual work all happens
-// server-side regardless of whether this tab stays open.
+// never auto-corrects anything. A full trade-count re-walk needs far more
+// subrequest budget than any single Worker invocation gets, so this has to
+// run across many chunks ("hops"). Originally the server tried to chain
+// hops on its own (fetching its own URL to trigger the next one), but
+// Cloudflare's own loop-prevention silently blocks a Worker repeatedly
+// calling itself -- confirmed live, every run reliably completed exactly
+// one hop and then stalled. This browser tab's own poll loop now drives
+// each next hop directly instead: less elegant than a pure background job,
+// but actually reliable. Switching tabs is still fine (background timers
+// keep running); fully closing this tab pauses recon exactly where it is,
+// and it resumes the moment this page reopens.
 let reconPollHandle=null;
 async function startRecon(){
-  if(!confirm("This re-walks EVERY trade's full price history from scratch to check for inconsistencies against what's currently stored. It runs in the background (can take a while for a large trade count) and never changes any trade data -- purely a read-only comparison report you review and fix yourself. Continue?")) return;
+  if(!confirm("This re-walks EVERY trade's full price history from scratch to check for inconsistencies against what's currently stored. It can take a while for a large trade count, and needs this tab to stay open (switching tabs is fine, closing it pauses progress until you come back). It never changes any trade data -- purely a read-only comparison report you review and fix yourself. Continue?")) return;
   showProgress('Starting recon…');
+  reconTick();
+}
+async function reconTick(){
+  clearTimeout(reconPollHandle);
   try{
-    const r=await fetch(WORKER+'/run-recon');
+    const r=await fetch(WORKER+'/run-recon'); // same entry point whether starting fresh or resuming -- the backend figures out which from existing state
     const j=await r.json();
-    if(j.status!=='ok') throw new Error(j.message||'Failed to start recon');
-    pollReconStatus();
+    if(j.status!=='ok') throw new Error(j.message||'Recon step failed');
+    const recon=j.recon;
+    if(recon.status==='running'){
+      operationInProgress=true; // warns against closing/reloading this tab, since that's what actually pauses recon now
+      showProgress(`Recon running… ${recon.processedCount}/${recon.totalTrades} trades checked, ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found so far`);
+      reconPollHandle=setTimeout(reconTick,1500);
+    }else if(recon.status==='done'){
+      operationInProgress=false;
+      finishProgress(`✓ Recon complete: ${recon.totalTrades} trades checked, ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found`);
+      renderReconResults(recon);
+    }else if(recon.status==='paused_hop_limit'){
+      operationInProgress=false;
+      finishProgress(`⚠ Recon paused after hitting its safety hop limit — ${recon.processedCount}/${recon.totalTrades} checked so far, ${recon.diffs.length} found. Click Run Recon again to resume from here.`);
+      renderReconResults(recon);
+    }else if(recon.status==='error'){
+      operationInProgress=false;
+      finishProgress(`✗ Recon error: ${recon.error||'unknown'}`);
+    }
   }catch(e){
-    hideProgressBanner();
-    toast('Recon failed to start: '+e.message,'err');
+    // Transient network hiccup -- keep trying rather than giving up, since
+    // this tab is now the only thing driving progress forward.
+    reconPollHandle=setTimeout(reconTick,4000);
   }
 }
-async function pollReconStatus(){
-  clearTimeout(reconPollHandle);
+// Read-only check on page load -- if a recon was left running (or paused)
+// from before a reload, resumes driving it forward automatically. Does
+// NOT start a brand-new recon on its own; only continues one that's
+// already in progress.
+async function checkReconOnLoad(){
   try{
     const r=await fetch(WORKER+'/recon-status');
     const j=await r.json();
     const recon=j.recon;
-    if(!recon){ return; } // nothing ever run -- stay quiet, don't show a banner for "no recon"
+    if(!recon) return;
     if(recon.status==='running'){
-      operationInProgress=true; // recon runs server-side regardless of this tab, but still worth warning against a reload while actively watching it
-      showProgress(`Recon running… ${recon.processedCount}/${recon.totalTrades} trades checked, ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found so far`);
-      reconPollHandle=setTimeout(pollReconStatus,4000);
-    }else if(recon.status==='done'){
-      finishProgress(`✓ Recon complete: ${recon.totalTrades} trades checked, ${recon.diffs.length} inconsistenc${recon.diffs.length===1?'y':'ies'} found`);
+      reconTick();
+    }else if(recon.status==='done'||recon.status==='paused_hop_limit'){
       renderReconResults(recon);
-    }else if(recon.status==='paused_hop_limit'){
-      finishProgress(`⚠ Recon paused after hitting its safety hop limit — ${recon.processedCount}/${recon.totalTrades} checked so far, ${recon.diffs.length} found. Click Run Recon again to resume from here.`);
-      renderReconResults(recon);
-    }else if(recon.status==='error'){
-      finishProgress(`✗ Recon error: ${recon.error||'unknown'}`);
     }
-  }catch(e){
-    // Transient network hiccup while polling shouldn't kill the whole
-    // recon UI -- the actual work is unaffected server-side, just keep
-    // trying to reconnect the progress display.
-    reconPollHandle=setTimeout(pollReconStatus,6000);
-  }
+  }catch(e){}
 }
 let LAST_RECON=null;
 function renderReconResults(recon){
@@ -3155,7 +3172,7 @@ document.getElementById('inp-date').value=new Date().toISOString().slice(0,10);
 document.getElementById('inp-time').value='09:15';
 setSeg('MOMENTUM');
 refreshAll();
-pollReconStatus();
+checkReconOnLoad();
 </script>
 </body>
 </html>
